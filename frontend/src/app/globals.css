@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+/*
+ * The public funnel is deliberately light-only for the MVP: quote pages must render
+ * identically everywhere (they're opened from emails on any device). Company branding
+ * theming layers on later.
+ */

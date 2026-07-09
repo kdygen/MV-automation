@@ -1,0 +1,40 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.db
+*.sqlite3
+
+# ---- Node / Next.js ----
+node_modules/
+.next/
+out/
+.turbo/
+dist/
+*.tsbuildinfo
+
+# ---- Env / secrets ----
+.env
+.env.local
+.env.*.local
+*.pem
+
+# ---- OS / editors ----
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# ---- ML artifacts ----
+ml/artifacts/
+*.pkl
+*.joblib
