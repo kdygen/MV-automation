@@ -11,7 +11,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Environment = Literal["development", "staging", "production", "test"]
@@ -60,6 +60,22 @@ class Settings(BaseSettings):
     @classmethod
     def _strip_origins(cls, value: str) -> str:
         return value.strip()
+
+    @model_validator(mode="after")
+    def _require_real_database_in_production(self) -> Settings:
+        """Refuse to start in production without an explicit PostgreSQL database.
+
+        ``database_url`` defaults to a local SQLite file for zero-setup development.
+        In production that default would silently boot the app on a throwaway file
+        database — data loss waiting to happen — so we fail loudly instead.
+        """
+        if self.environment == "production" and not self.database_url.startswith("postgresql"):
+            raise ValueError(
+                "ENVIRONMENT=production requires DATABASE_URL to point at PostgreSQL "
+                f"(got: {self.database_url.split('://')[0]}://...). Set DATABASE_URL to "
+                "your Supabase connection string."
+            )
+        return self
 
     @property
     def cors_origin_list(self) -> list[str]:

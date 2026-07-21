@@ -25,4 +25,5 @@ EXPOSE 8000
 
 # Migrations are run as a deploy step (`alembic upgrade head`), not at container boot,
 # to avoid concurrent-migration races when multiple replicas start.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Render (and most PaaS hosts) inject the listen port via $PORT; default to 8000 locally.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
