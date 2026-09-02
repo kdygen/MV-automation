@@ -22,10 +22,23 @@ back so future estimates get more accurate.
 
 ## Status
 
-**MVP complete.** See [BUILD_PLAN.md](BUILD_PLAN.md) for milestone details and the
-post-MVP roadmap (AI chat, ML pricing stages). The MVP targets **local, hourly-priced
-moves**: form intake → instant rule-based quote (range) → accept link → automatic
-booking → dashboard → actuals capture + CSV history import.
+**Live.** 🚀
+
+- **App:** https://mv-automation-dqus.vercel.app — try the demo funnel at
+  [/acme-movers/quote](https://mv-automation-dqus.vercel.app/acme-movers/quote)
+- **API:** https://mv-automation.onrender.com ([docs](https://mv-automation.onrender.com/docs))
+- **Production stack:** Vercel (frontend) · Render (FastAPI backend) · Supabase
+  (PostgreSQL + Auth, ES256 token verification via JWKS)
+
+The MVP covers **local, hourly-priced moves**: form intake → instant rule-based quote
+(range) → accept link → automatic booking → company dashboard → actuals capture + CSV
+history import. See [BUILD_PLAN.md](BUILD_PLAN.md) for milestone history and the
+roadmap (hardening, AI chat, ML pricing stages).
+
+*The deployed demo currently uses a deterministic stand-in for driving distance and
+logs emails instead of sending them. The real providers (Resend, Google Distance
+Matrix) are implemented and tested — they activate via environment variables once API
+keys are configured.*
 
 ## Quick start (full local demo)
 
@@ -64,9 +77,14 @@ cd backend && pytest        # 93 tests
 cd frontend && npm test     # 13 tests
 ```
 
-## What needs your accounts before going live
+## Remaining external keys
 
-The code runs and is fully tested locally with faked providers. To deploy, you supply:
-Supabase project (Postgres URL + JWT secret), an LLM key (chat milestone), a
-geocoding/distance key, an email provider key, and Vercel + Railway accounts. See the
-deployment checklist at the bottom of [BUILD_PLAN.md](BUILD_PLAN.md).
+Deployment (Supabase + Render + Vercel) and real authentication are done. Two API keys
+switch the demo stand-ins to the real thing — env-var flips on Render, no code changes:
+
+| Env vars (Render) | Turns on |
+|---|---|
+| `EMAIL_PROVIDER=resend` + `EMAIL_API_KEY` | Real quote/booking emails via Resend |
+| `GEOCODING_PROVIDER=google` + `GEOCODING_API_KEY` | Real driving distance via Google Maps |
+
+An Anthropic API key is only needed later, for the AI chat milestone.

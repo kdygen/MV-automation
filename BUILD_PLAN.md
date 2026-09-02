@@ -32,25 +32,37 @@ ships with tests, and is committed separately. Tests passing is the gate to adva
 end-to-end against the running stack: submit → instant quote → accept → booking →
 actuals → accuracy scorecard.
 
-### Post-MVP (roadmap, not in this build)
+### Post-MVP
 
-| 8 | Deploy + hardening (Vercel/Railway, rate limiting, Sentry, backups) |
-| 9 | AI chat assistant (extraction schema, missing-info loop) |
-| 10 | Pricing Stage 2 — similar-job retrieval, shadow comparison |
-| 11 | Pricing Stage 3 — XGBoost hours model, model registry, shadow mode |
-| 12 | Pricing Stage 4 — scheduled retraining, drift monitoring |
+| 8 | Deploy + real authentication (Supabase Postgres, Render, Vercel, ES256/JWKS auth) | ✅ done (2026-09) |
+| 8b | Real providers — Resend email + Google Maps distance (code ✅ tested; activate via env keys) | ⬜ keys pending |
+| 8c | Hardening — rate limiting, Sentry, backups check | ⬜ next |
+| 9 | AI chat assistant (extraction schema, missing-info loop) | ⬜ |
+| 10 | Pricing Stage 2 — similar-job retrieval, shadow comparison | ⬜ |
+| 11 | Pricing Stage 3 — XGBoost hours model, model registry, shadow mode | ⬜ |
+| 12 | Pricing Stage 4 — scheduled retraining, drift monitoring | ⬜ |
+
+**Deployed (2026-09):** app at https://mv-automation-dqus.vercel.app · API at
+https://mv-automation.onrender.com · Supabase PostgreSQL + Auth (ES256 via JWKS).
+Full loop verified live: submit → instant quote → accept → booking → dashboard login.
 
 Each ML stage ships in **shadow mode** first (computed alongside the active engine,
 deltas logged) and is promoted per-company only when it beats the incumbent on actuals.
 
-## Deployment checklist (fill in when going live)
+## Deployment checklist
 
-- [ ] Supabase project created → `DATABASE_URL`, `SUPABASE_JWT_SECRET`, `SUPABASE_URL`,
+- [x] Supabase project created → `DATABASE_URL` (session pooler), `SUPABASE_URL`,
       `SUPABASE_ANON_KEY`
-- [ ] `alembic upgrade head` run against the Supabase Postgres
-- [ ] Geocoding/distance provider key → `GEOCODING_API_KEY`, set `GEOCODING_PROVIDER`
-- [ ] Email provider key → `EMAIL_API_KEY`, set `EMAIL_PROVIDER`
+- [x] `alembic upgrade head` run against the Supabase Postgres (revisions 0001–0005)
+- [x] Backend deployed to Render (Docker, `$PORT` binding, production DB guard)
+- [x] Frontend deployed to Vercel; `NEXT_PUBLIC_API_URL` points at the backend
+- [x] CORS locked to the Vercel origin
+- [x] Real Supabase Auth — ES256 tokens verified via the project JWKS; first owner
+      provisioned with `scripts/provision_staff.py`
+- [ ] Geocoding/distance key → `GEOCODING_API_KEY`, `GEOCODING_PROVIDER=google`
+- [ ] Email key → `EMAIL_API_KEY`, `EMAIL_PROVIDER=resend` (+ verify sending domain)
+- [x] Rate limiting on public endpoints (per-IP sliding window; 429 on abuse)
+- [x] Supabase RLS enabled deny-all on all business tables (defense-in-depth; verified
+      live — app unaffected, anon-key access blocked)
+- [ ] Sentry error monitoring — code ready, activates when `SENTRY_DSN` is set
 - [ ] LLM key (chat milestone) → `ANTHROPIC_API_KEY`
-- [ ] Backend deployed to Railway/Render (Docker)
-- [ ] Frontend deployed to Vercel; `NEXT_PUBLIC_API_URL` points at the backend
-- [ ] Supabase RLS policies applied (deny-all by default)

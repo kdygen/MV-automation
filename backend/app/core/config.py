@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     # --- LLM (chat milestone) ---
     anthropic_api_key: str = ""
 
+    # --- Hardening ---
+    rate_limit_enabled: bool = True
+    sentry_dsn: str = ""  # empty = Sentry disabled
+
     @field_validator("cors_origins")
     @classmethod
     def _strip_origins(cls, value: str) -> str:

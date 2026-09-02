@@ -63,6 +63,11 @@ class ForbiddenError(AppError):
     status_code = status.HTTP_403_FORBIDDEN
 
 
+class RateLimitError(AppError):
+    code = "rate_limited"
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+
+
 def _error_body(code: str, message: str) -> dict[str, dict[str, str]]:
     return {"error": {"code": code, "message": message}}
 

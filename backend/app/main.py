@@ -24,6 +24,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging()
 
+    if settings.sentry_dsn:
+        # Optional error monitoring: dormant unless SENTRY_DSN is configured.
+        import sentry_sdk
+
+        sentry_sdk.init(
+            dsn=settings.sentry_dsn,
+            environment=settings.environment,
+            traces_sample_rate=0.0,  # errors only; no performance tracing overhead
+        )
+        logger.info("Sentry error monitoring enabled")
+
     app = FastAPI(
         title=settings.app_name,
         version="0.1.0",

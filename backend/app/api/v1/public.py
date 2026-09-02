@@ -18,6 +18,7 @@ from app.api.deps import (
 )
 from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
+from app.core.ratelimit import rate_limited
 from app.db.session import get_db
 from app.models import Company, Lead, MovingRequest, Quote, QuoteStatus
 from app.pricing import PricingInputError
@@ -31,6 +32,11 @@ from app.services import quotes as quote_service
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/public", tags=["public"])
+
+# Public POSTs are internet-exposed with no auth; per-IP sliding-window limits damp
+# abuse (form spam, token brute-forcing) without touching legitimate customers.
+_limit_submit = rate_limited("public_submit", max_requests=20, window_seconds=600)
+_limit_quote_action = rate_limited("public_quote_action", max_requests=30, window_seconds=600)
 
 
 def _public_quote_summary(quote: Quote) -> QuoteSummaryPublic:
@@ -50,7 +56,12 @@ def _public_quote_summary(quote: Quote) -> QuoteSummaryPublic:
     )
 
 
-@router.post("/{company_slug}/requests", response_model=IntakeResponse, status_code=201)
+@router.post(
+    "/{company_slug}/requests",
+    response_model=IntakeResponse,
+    status_code=201,
+    dependencies=[Depends(_limit_submit)],
+)
 def submit_moving_request(
     company_slug: str,
     payload: MovingRequestIn,
@@ -133,7 +144,11 @@ def view_quote(token: str, db: Session = Depends(get_db)) -> QuotePublicOut:
     )
 
 
-@router.post("/quotes/{token}/accept", response_model=AcceptQuoteResponse)
+@router.post(
+    "/quotes/{token}/accept",
+    response_model=AcceptQuoteResponse,
+    dependencies=[Depends(_limit_quote_action)],
+)
 def accept_quote(
     token: str,
     db: Session = Depends(get_db),
@@ -155,7 +170,11 @@ def accept_quote(
     )
 
 
-@router.post("/quotes/{token}/decline", response_model=QuotePublicOut)
+@router.post(
+    "/quotes/{token}/decline",
+    response_model=QuotePublicOut,
+    dependencies=[Depends(_limit_quote_action)],
+)
 def decline_quote(token: str, db: Session = Depends(get_db)) -> QuotePublicOut:
     """Customer declines the quote."""
     quote = quote_service.get_quote_by_token(db, token)
