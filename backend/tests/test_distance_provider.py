@@ -41,7 +41,7 @@ def test_registry_returns_fake(test_settings: Settings) -> None:
 
 
 def test_registry_rejects_unimplemented_provider() -> None:
-    settings = Settings(geocoding_provider="google", _env_file=None)
+    settings = Settings(geocoding_provider="mapbox", _env_file=None)
     with pytest.raises(ProviderConfigurationError, match="not implemented"):
         get_distance_provider(settings)
 

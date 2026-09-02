@@ -23,7 +23,10 @@ from app.core.security import decode_access_token
 from app.db.session import get_db
 from app.models.user import User, UserRole
 from app.providers.distance import DistanceProvider, get_distance_provider
-from app.providers.email import FakeEmailProvider, get_email_provider
+from app.providers.email import FakeEmailProvider, ResendEmailProvider, get_email_provider
+
+# What the email dependency can hand out (fake in dev/tests, Resend in production).
+AnyEmailProvider = FakeEmailProvider | ResendEmailProvider
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -33,7 +36,7 @@ def distance_provider_dep(settings: Settings = Depends(get_settings)) -> Distanc
     return get_distance_provider(settings)
 
 
-def email_provider_dep(settings: Settings = Depends(get_settings)) -> FakeEmailProvider:
+def email_provider_dep(settings: Settings = Depends(get_settings)) -> AnyEmailProvider:
     """Resolve the configured email provider (overridden in tests)."""
     return get_email_provider(settings)
 
@@ -68,6 +71,7 @@ def get_current_user(
         secret=settings.supabase_jwt_secret,
         algorithms=[settings.jwt_algorithm],
         audience=settings.supabase_jwt_audience,
+        jwks_url=settings.supabase_jwks_url,
     )
 
     try:

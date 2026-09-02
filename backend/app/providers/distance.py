@@ -7,9 +7,13 @@ pricing. The interface is a single call; implementations:
   Distance is derived from the numeric difference of the two ZIP codes, so identical
   ZIPs are "close" and far-apart ZIPs are "far" — stable and good enough to exercise
   every pricing path.
-- ``google`` / ``mapbox`` — real implementations land with the deployment milestone;
-  selecting them before that raises a clear configuration error instead of silently
-  falling back to fake numbers.
+- :class:`GoogleDistanceProvider` — real driving distance via the Google Distance
+  Matrix API. Selected with ``GEOCODING_PROVIDER=google`` + ``GEOCODING_API_KEY``.
+- ``mapbox`` — planned; selecting it raises a clear configuration error instead of
+  silently falling back to fake numbers.
+
+Lookup failures raise :class:`DistanceLookupError`; the intake service treats distance
+as best-effort (a lead is stored without a distance rather than lost).
 """
 
 from __future__ import annotations
@@ -17,7 +21,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+import httpx
+
 from app.core.config import Settings
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
+_GOOGLE_ENDPOINT = "https://maps.googleapis.com/maps/api/distancematrix/json"
+_LOOKUP_TIMEOUT_SECONDS = 10.0
+_METERS_PER_MILE = 1609.344
 
 
 @dataclass(frozen=True)
@@ -74,6 +87,62 @@ def _zip_number(zip_code: str) -> int:
     return int(digits) if digits else 0
 
 
+class DistanceLookupError(RuntimeError):
+    """A provider could not resolve a driving distance for the given addresses."""
+
+
+class GoogleDistanceProvider:
+    """Driving distance via the Google Distance Matrix API.
+
+    :param transport: injectable ``httpx`` transport so tests run without network.
+    """
+
+    def __init__(self, *, api_key: str, transport: httpx.BaseTransport | None = None) -> None:
+        self._api_key = api_key
+        self._transport = transport
+
+    @staticmethod
+    def _format(point: RoutePoint) -> str:
+        return f"{point.line1}, {point.city}, {point.state} {point.zip}"
+
+    def distance_miles(self, origin: RoutePoint, destination: RoutePoint) -> DistanceResult:
+        try:
+            with httpx.Client(
+                transport=self._transport, timeout=_LOOKUP_TIMEOUT_SECONDS
+            ) as client:
+                response = client.get(
+                    _GOOGLE_ENDPOINT,
+                    params={
+                        "origins": self._format(origin),
+                        "destinations": self._format(destination),
+                        "units": "imperial",
+                        "key": self._api_key,
+                    },
+                )
+        except httpx.HTTPError as exc:
+            raise DistanceLookupError(f"Distance Matrix request failed: {exc}") from exc
+
+        if response.status_code != 200:
+            raise DistanceLookupError(
+                f"Distance Matrix returned HTTP {response.status_code}"
+            )
+        body = response.json()
+        if body.get("status") != "OK":
+            raise DistanceLookupError(f"Distance Matrix status: {body.get('status')}")
+        try:
+            element = body["rows"][0]["elements"][0]
+        except (KeyError, IndexError) as exc:
+            raise DistanceLookupError("Distance Matrix response missing elements") from exc
+        if element.get("status") != "OK":
+            # e.g. NOT_FOUND / ZERO_RESULTS for an unroutable address
+            raise DistanceLookupError(f"Route element status: {element.get('status')}")
+
+        meters = element["distance"]["value"]
+        miles = round(meters / _METERS_PER_MILE, 1)
+        logger.info("Google distance: %.1f mi (%s → %s)", miles, origin.zip, destination.zip)
+        return DistanceResult(miles=miles, provider="google")
+
+
 class ProviderConfigurationError(RuntimeError):
     """Raised when a configured provider is unknown or not yet available."""
 
@@ -83,9 +152,15 @@ def get_distance_provider(settings: Settings) -> DistanceProvider:
     name = settings.geocoding_provider.lower()
     if name == "fake":
         return FakeDistanceProvider()
-    if name in {"google", "mapbox"}:
+    if name == "google":
+        if not settings.geocoding_api_key:
+            raise ProviderConfigurationError(
+                "GEOCODING_PROVIDER=google requires GEOCODING_API_KEY to be set"
+            )
+        return GoogleDistanceProvider(api_key=settings.geocoding_api_key)
+    if name == "mapbox":
         raise ProviderConfigurationError(
-            f"Distance provider '{name}' is planned but not implemented yet; "
-            "set GEOCODING_PROVIDER=fake"
+            "Distance provider 'mapbox' is planned but not implemented yet; "
+            "set GEOCODING_PROVIDER=fake or google"
         )
     raise ProviderConfigurationError(f"Unknown distance provider '{name}'")

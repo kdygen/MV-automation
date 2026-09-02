@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
+    AnyEmailProvider,
     CurrentUser,
     email_provider_dep,
     get_current_user,
@@ -21,7 +22,6 @@ from app.api.deps import (
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models import Company, Lead, MovingRequest, UserRole
-from app.providers.email import FakeEmailProvider
 from app.schemas.dashboard import QuoteListOut
 from app.schemas.quotes import ApproveQuoteIn, QuoteAdminOut
 from app.services import dashboard, notifications
@@ -63,7 +63,7 @@ def approve_quote(
     user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    email_provider: FakeEmailProvider = Depends(email_provider_dep),
+    email_provider: AnyEmailProvider = Depends(email_provider_dep),
 ) -> QuoteAdminOut:
     """Approve a draft quote (optionally adjusting the range); emails the customer."""
     quote = quote_service.get_quote_for_company(db, company_id=user.company_id, quote_id=quote_id)

@@ -10,14 +10,18 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.api.deps import distance_provider_dep, email_provider_dep, quote_public_url
+from app.api.deps import (
+    AnyEmailProvider,
+    distance_provider_dep,
+    email_provider_dep,
+    quote_public_url,
+)
 from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
 from app.db.session import get_db
 from app.models import Company, Lead, MovingRequest, Quote, QuoteStatus
 from app.pricing import PricingInputError
 from app.providers.distance import DistanceProvider
-from app.providers.email import FakeEmailProvider
 from app.schemas.intake import IntakeResponse, MovingRequestIn, MovingRequestOut
 from app.schemas.quotes import AcceptQuoteResponse, QuotePublicOut, QuoteSummaryPublic
 from app.services import intake as intake_service
@@ -52,7 +56,7 @@ def submit_moving_request(
     payload: MovingRequestIn,
     db: Session = Depends(get_db),
     distance_provider: DistanceProvider = Depends(distance_provider_dep),
-    email_provider: FakeEmailProvider = Depends(email_provider_dep),
+    email_provider: AnyEmailProvider = Depends(email_provider_dep),
     settings: Settings = Depends(get_settings),
 ) -> IntakeResponse:
     """Accept a moving request; instant-quote it when possible.
@@ -133,7 +137,7 @@ def view_quote(token: str, db: Session = Depends(get_db)) -> QuotePublicOut:
 def accept_quote(
     token: str,
     db: Session = Depends(get_db),
-    email_provider: FakeEmailProvider = Depends(email_provider_dep),
+    email_provider: AnyEmailProvider = Depends(email_provider_dep),
 ) -> AcceptQuoteResponse:
     """Customer accepts the quote; a booking is created automatically."""
     quote = quote_service.get_quote_by_token(db, token)
