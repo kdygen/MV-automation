@@ -7,6 +7,12 @@ model modules to the imports below.
 
 from app.models.booking import Booking, BookingStatus
 from app.models.company import Company
+from app.models.conversation import (
+    Conversation,
+    ConversationStatus,
+    Message,
+    MessageRole,
+)
 from app.models.job import Job, JobSource
 from app.models.lead import Lead, LeadSource, LeadStatus
 from app.models.moving_request import (
@@ -24,6 +30,8 @@ __all__ = [
     "Booking",
     "BookingStatus",
     "Company",
+    "Conversation",
+    "ConversationStatus",
     "ExtractionSource",
     "HomeSize",
     "Job",
@@ -31,6 +39,8 @@ __all__ = [
     "Lead",
     "LeadSource",
     "LeadStatus",
+    "Message",
+    "MessageRole",
     "MovingRequest",
     "PackingService",
     "PricingConfigRow",
