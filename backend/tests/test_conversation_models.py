@@ -8,7 +8,7 @@ tool/usage columns, and cascade cleanup.
 from __future__ import annotations
 
 import uuid
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -76,7 +76,9 @@ def make_quote_chain(db, company: Company, *, email: str = "bob@example.com"):
         line_items=[],
         inputs_snapshot={},
         public_token=uuid.uuid4().hex,
-        valid_until=date.today() + timedelta(days=14),
+        # Aware datetime: the column is DateTime(timezone=True) and the quote service
+        # compares it against ``now`` (a plain date would have no tzinfo).
+        valid_until=datetime.now(UTC) + timedelta(days=14),
     )
     db.add(quote)
     db.commit()
