@@ -67,6 +67,7 @@ FORBIDDEN_ARGUMENTS = frozenset(
 _NO_ARGUMENTS: dict[str, Any] = {
     "type": "object",
     "properties": {},
+    "required": [],
     "additionalProperties": False,
 }
 

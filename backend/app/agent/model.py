@@ -1,10 +1,10 @@
 """Provider-independent chat-model types.
 
-The orchestration loop speaks only these types, never a vendor SDK's. Anthropic
-returns content *blocks* with ``tool_use`` entries; OpenAI returns a ``tool_calls``
-array whose arguments are a JSON *string*. Both translate into the types below in a
-thin adapter, so switching providers never touches the loop — and, in Step 1C, the
-loop is exercised with no network and no API key at all.
+The orchestration loop speaks only these types, never a vendor SDK's. Providers
+disagree structurally — one returns tool calls as typed content blocks, another as
+items whose arguments are a JSON *string* — so each is translated in a thin adapter
+and switching providers never touches the loop. It also means the loop is exercised
+with no network and no API key at all.
 
 Response contract (enforced by the loop):
 

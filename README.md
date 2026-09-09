@@ -87,4 +87,5 @@ switch the demo stand-ins to the real thing — env-var flips on Render, no code
 | `EMAIL_PROVIDER=resend` + `EMAIL_API_KEY` | Real quote/booking emails via Resend |
 | `GEOCODING_PROVIDER=google` + `GEOCODING_API_KEY` | Real driving distance via Google Maps |
 
-An Anthropic API key is only needed later, for the AI chat milestone.
+An OpenAI API key (`OPENAI_API_KEY`) is only needed for the AI sales-assistant
+milestone, which is still in development.

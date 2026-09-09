@@ -18,6 +18,12 @@ from app.agent.errors import (
     AgentError,
     AgentLoopError,
     ModelProtocolError,
+    ProviderAuthError,
+    ProviderError,
+    ProviderRateLimitError,
+    ProviderRefusalError,
+    ProviderResponseError,
+    ProviderUnavailableError,
     ToolArgumentError,
     ToolExecutionError,
     UnknownToolError,
@@ -31,6 +37,7 @@ from app.agent.model import (
     ToolCall,
     ToolDefinition,
 )
+from app.agent.prompts import SYSTEM_PROMPT, build_system_prompt
 from app.agent.tools import TOOL_DEFINITIONS, TOOL_SCHEMAS, ToolExecutor
 
 __all__ = [
@@ -44,6 +51,13 @@ __all__ = [
     "ModelMessage",
     "ModelProtocolError",
     "ModelResponse",
+    "ProviderAuthError",
+    "ProviderError",
+    "ProviderRateLimitError",
+    "ProviderRefusalError",
+    "ProviderResponseError",
+    "ProviderUnavailableError",
+    "SYSTEM_PROMPT",
     "TokenUsage",
     "ToolArgumentError",
     "ToolCall",
@@ -51,6 +65,7 @@ __all__ = [
     "ToolExecutionError",
     "ToolExecutor",
     "UnknownToolError",
+    "build_system_prompt",
     "run_agent_turn",
     "to_model_messages",
 ]

@@ -65,4 +65,4 @@ deltas logged) and is promoted per-company only when it beats the incumbent on a
 - [x] Supabase RLS enabled deny-all on all business tables (defense-in-depth; verified
       live — app unaffected, anon-key access blocked)
 - [ ] Sentry error monitoring — code ready, activates when `SENTRY_DSN` is set
-- [ ] LLM key (chat milestone) → `ANTHROPIC_API_KEY`
+- [ ] LLM key (AI sales assistant) → `OPENAI_API_KEY`

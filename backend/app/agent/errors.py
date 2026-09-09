@@ -44,3 +44,31 @@ class ModelProtocolError(AgentError):
     A response must either request tools or provide final text. Anything else is a
     provider/adapter fault, not something to retry around.
     """
+
+
+class ProviderError(AgentError):
+    """Base class for failures talking to the model provider."""
+
+
+class ProviderAuthError(ProviderError):
+    """The provider rejected our credentials (missing/invalid/insufficient key)."""
+
+
+class ProviderRateLimitError(ProviderError):
+    """The provider throttled us. The SDK already retried; this is the final answer."""
+
+
+class ProviderUnavailableError(ProviderError):
+    """Timeout, connection failure, or provider-side 5xx."""
+
+
+class ProviderResponseError(ProviderError):
+    """The provider returned something we cannot faithfully translate.
+
+    Includes malformed tool-call arguments. Never coerced into an empty dict — a
+    tool invoked with silently-dropped arguments is worse than a failed turn.
+    """
+
+
+class ProviderRefusalError(ProviderError):
+    """The model declined to answer (``stop_reason == "refusal"``)."""

@@ -53,8 +53,15 @@ class Settings(BaseSettings):
     email_api_key: str = ""
     email_from: str = "quotes@example.com"
 
-    # --- LLM (chat milestone) ---
-    anthropic_api_key: str = ""
+    # --- LLM / agent ---
+    openai_api_key: str = ""
+    agent_model: str = "gpt-5-mini"
+    agent_max_output_tokens: int = 4096
+    # GPT-5 family supports minimal | low | medium | high. "low" keeps latency and
+    # cost down while still reasoning enough to pick the right tool reliably;
+    # "minimal" trades tool-selection reliability for speed.
+    agent_reasoning_effort: str = "low"
+    agent_timeout_seconds: float = 30.0
 
     # --- Hardening ---
     rate_limit_enabled: bool = True
