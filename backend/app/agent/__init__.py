@@ -14,15 +14,43 @@ network and no API key.
 """
 
 from app.agent.context import AgentContext
-from app.agent.errors import AgentError, ToolArgumentError, ToolExecutionError, UnknownToolError
-from app.agent.tools import TOOL_SCHEMAS, ToolExecutor
+from app.agent.errors import (
+    AgentError,
+    AgentLoopError,
+    ModelProtocolError,
+    ToolArgumentError,
+    ToolExecutionError,
+    UnknownToolError,
+)
+from app.agent.loop import AgentTurnResult, run_agent_turn, to_model_messages
+from app.agent.model import (
+    ChatModel,
+    ModelMessage,
+    ModelResponse,
+    TokenUsage,
+    ToolCall,
+    ToolDefinition,
+)
+from app.agent.tools import TOOL_DEFINITIONS, TOOL_SCHEMAS, ToolExecutor
 
 __all__ = [
+    "TOOL_DEFINITIONS",
     "TOOL_SCHEMAS",
     "AgentContext",
     "AgentError",
+    "AgentLoopError",
+    "AgentTurnResult",
+    "ChatModel",
+    "ModelMessage",
+    "ModelProtocolError",
+    "ModelResponse",
+    "TokenUsage",
     "ToolArgumentError",
+    "ToolCall",
+    "ToolDefinition",
     "ToolExecutionError",
     "ToolExecutor",
     "UnknownToolError",
+    "run_agent_turn",
+    "to_model_messages",
 ]

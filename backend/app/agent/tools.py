@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from app.agent.context import AgentContext
 from app.agent.errors import ToolArgumentError, ToolExecutionError, UnknownToolError
+from app.agent.model import ToolDefinition
 from app.agent.schemas import (
     CompanyInfo,
     MoveDetails,
@@ -215,6 +216,17 @@ TOOL_REGISTRY: dict[str, tuple[dict[str, Any], Callable[[Session, AgentContext],
 #: The tool definitions a model is shown. Ordering is stable for prompt caching.
 TOOL_SCHEMAS: tuple[dict[str, Any], ...] = tuple(
     schema for schema, _ in TOOL_REGISTRY.values()
+)
+
+#: The same allowlist in provider-neutral form, for the orchestration loop. Derived
+#: from TOOL_SCHEMAS so there is exactly one source of truth for what a model is shown.
+TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = tuple(
+    ToolDefinition(
+        name=schema["name"],
+        description=schema["description"],
+        input_schema=schema["input_schema"],
+    )
+    for schema in TOOL_SCHEMAS
 )
 
 

@@ -28,3 +28,19 @@ class ToolArgumentError(AgentError):
 
 class ToolExecutionError(AgentError):
     """A tool could not complete because expected data was missing or malformed."""
+
+
+class AgentLoopError(AgentError):
+    """The turn did not converge within its iteration budget.
+
+    Rows already written (the user message, any tool calls) are deliberately left in
+    place: they are the record of what the model attempted.
+    """
+
+
+class ModelProtocolError(AgentError):
+    """The model returned a response that satisfies neither branch of the contract.
+
+    A response must either request tools or provide final text. Anything else is a
+    provider/adapter fault, not something to retry around.
+    """
