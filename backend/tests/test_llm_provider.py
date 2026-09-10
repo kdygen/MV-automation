@@ -188,7 +188,7 @@ class TestResponseTranslation:
 
 
 class TestRequestTranslation:
-    def test_tools_use_strict_zero_argument_schemas(self) -> None:
+    def test_tools_use_strict_closed_schemas(self) -> None:
         model, client = make_model([provider_response([message_item(output_text("hi"))])])
         model.complete(system="s", messages=USER, tools=TOOL_DEFINITIONS)
 
@@ -197,14 +197,19 @@ class TestRequestTranslation:
             "get_quote_summary",
             "get_move_details",
             "get_company_info",
+            "search_company_knowledge",
         }
         for tool in tools:
             assert tool["type"] == "function"
             assert tool["strict"] is True
             schema = tool["parameters"]
-            assert schema["properties"] == {}
-            assert schema["required"] == []
             assert schema["additionalProperties"] is False
+            # Strict mode requires every declared property to be required.
+            assert set(schema["required"]) == set(schema["properties"])
+            # Only keywords known to be accepted in strict mode are sent.
+            assert set(schema) <= {"type", "properties", "required", "additionalProperties"}
+            for prop in schema["properties"].values():
+                assert set(prop) <= {"type", "description"}
 
     def test_no_tool_schema_accepts_an_identifier(self) -> None:
         model, client = make_model([provider_response([message_item(output_text("hi"))])])

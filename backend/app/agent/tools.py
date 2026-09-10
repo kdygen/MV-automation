@@ -4,10 +4,11 @@ The model may choose **which** of these tools runs. It may never choose **whose*
 they read: every handler receives an :class:`~app.agent.context.AgentContext` built
 server-side, and every query filters on ``context.company_id``.
 
-In Step 1B all three tools take zero model-visible arguments, so there is nowhere for a
-hallucinated identifier to go. :data:`FORBIDDEN_ARGUMENTS` is nonetheless enforced by
-the executor, because it must keep holding when later tools (e.g. a pricing preview)
-legitimately accept business arguments.
+``search_company_knowledge`` is the first tool with a model-visible argument. That
+argument is a free-text search string, never an identifier: it selects *what* to look
+for, while :class:`AgentContext` still decides *whose* knowledge is searched.
+:data:`FORBIDDEN_ARGUMENTS` is enforced by the executor before any schema check, so the
+widened surface adds no way to steer scope.
 
 Every tool here is strictly read-only — no handler writes, and none calls a service
 that writes (notably, ``is_expired`` is computed in memory rather than by invoking the
@@ -28,6 +29,8 @@ from app.agent.errors import ToolArgumentError, ToolExecutionError, UnknownToolE
 from app.agent.model import ToolDefinition
 from app.agent.schemas import (
     CompanyInfo,
+    KnowledgeEntry,
+    KnowledgeResults,
     MoveDetails,
     QuoteLineItem,
     QuoteSummary,
@@ -35,10 +38,22 @@ from app.agent.schemas import (
 )
 from app.core.logging import get_logger
 from app.models import Company, MovingRequest, Quote
+from app.services.knowledge import MAX_RESULTS, search_knowledge
 
 logger = get_logger(__name__)
 
 DEFAULT_QUOTE_VALIDITY_DAYS = 14
+
+#: Longest search string the knowledge tool accepts. Bounds the work a single model turn
+#: can trigger and stops a whole transcript being passed off as a "query".
+#:
+#: Enforced server-side only, and deliberately absent from the model-visible JSON Schema.
+#: OpenAI's strict-mode schema support is a documented *subset* of JSON Schema, and the
+#: published list of permitted keywords could not be confirmed to include ``maxLength``;
+#: an unsupported keyword is rejected with a 400, which would take the whole chat
+#: endpoint down for a constraint the model cannot be trusted to honour anyway. The
+#: limit lives where it is actually enforceable.
+MAX_KNOWLEDGE_QUERY_LENGTH = 200
 
 #: Argument names a tool may never accept from a model, regardless of its schema.
 #: Identity is injected from :class:`AgentContext`; anything resembling a resource
@@ -93,8 +108,14 @@ def _load_quote(db: Session, context: AgentContext) -> Quote:
     return quote
 
 
-def get_quote_summary(db: Session, context: AgentContext) -> QuoteSummary:
-    """Return the customer-facing summary of the quote bound to this conversation."""
+def get_quote_summary(
+    db: Session, context: AgentContext, arguments: dict[str, Any]
+) -> QuoteSummary:
+    """Return the customer-facing summary of the quote bound to this conversation.
+
+    Takes no arguments; ``arguments`` is present only so every handler shares one
+    signature, and is empty by the time the executor calls this.
+    """
     quote = _load_quote(db, context)
     return QuoteSummary(
         status=quote.status.value,
@@ -117,8 +138,10 @@ def get_quote_summary(db: Session, context: AgentContext) -> QuoteSummary:
     )
 
 
-def get_move_details(db: Session, context: AgentContext) -> MoveDetails:
-    """Return the move this conversation's quote was priced from."""
+def get_move_details(
+    db: Session, context: AgentContext, arguments: dict[str, Any]
+) -> MoveDetails:
+    """Return the move this conversation's quote was priced from. Takes no arguments."""
     quote = _load_quote(db, context)
     request = db.scalar(
         select(MovingRequest).where(
@@ -156,8 +179,10 @@ def get_move_details(db: Session, context: AgentContext) -> MoveDetails:
     )
 
 
-def get_company_info(db: Session, context: AgentContext) -> CompanyInfo:
-    """Return public-facing details of the company this conversation belongs to."""
+def get_company_info(
+    db: Session, context: AgentContext, arguments: dict[str, Any]
+) -> CompanyInfo:
+    """Return public-facing details of the company. Takes no arguments."""
     company = db.scalar(select(Company).where(Company.id == context.company_id))
     if company is None:
         raise ToolExecutionError("Company details are unavailable")
@@ -175,9 +200,45 @@ def get_company_info(db: Session, context: AgentContext) -> CompanyInfo:
     )
 
 
+def search_company_knowledge(
+    db: Session, context: AgentContext, arguments: dict[str, Any]
+) -> KnowledgeResults:
+    """Search this company's published policies and FAQs for the customer's question.
+
+    The only model-supplied input in the tool layer. It is validated here as well as by
+    the executor's schema check, because this handler must be safe on its own terms:
+    a non-string or oversized query is a client error, not something to pass through.
+    """
+    raw = arguments.get("query")
+    if not isinstance(raw, str):
+        raise ToolArgumentError("search_company_knowledge requires a text query")
+
+    query = raw.strip()
+    if not query:
+        raise ToolArgumentError("search_company_knowledge requires a non-empty query")
+    if len(query) > MAX_KNOWLEDGE_QUERY_LENGTH:
+        raise ToolArgumentError(
+            f"query must be at most {MAX_KNOWLEDGE_QUERY_LENGTH} characters"
+        )
+
+    # company_id comes from the server-built context — never from `arguments`.
+    matches = search_knowledge(db, context.company_id, query)
+    return KnowledgeResults(
+        results=tuple(
+            # Rebuilt field by field: the score and the curated keywords stay internal.
+            KnowledgeEntry(
+                category=match.category, title=match.title, content=match.content
+            )
+            for match in matches
+        )
+    )
+
+
 #: name → (model-visible JSON Schema, handler). The registry is the allowlist: there is
 #: no dynamic lookup by string anywhere, so the model can only reach these functions.
-TOOL_REGISTRY: dict[str, tuple[dict[str, Any], Callable[[Session, AgentContext], Any]]] = {
+TOOL_REGISTRY: dict[
+    str, tuple[dict[str, Any], Callable[[Session, AgentContext, dict[str, Any]], Any]]
+] = {
     "get_quote_summary": (
         {
             "name": "get_quote_summary",
@@ -211,6 +272,36 @@ TOOL_REGISTRY: dict[str, tuple[dict[str, Any], Callable[[Session, AgentContext],
             "input_schema": _NO_ARGUMENTS,
         },
         get_company_info,
+    ),
+    "search_company_knowledge": (
+        {
+            "name": "search_company_knowledge",
+            "description": (
+                "Search this moving company's published policies and FAQs — insurance "
+                "and certificates of insurance, packing supplies, cancellation and "
+                "rescheduling, payment methods, tipping, prohibited or special items, "
+                "storage, and similar company-specific rules. Use this whenever the "
+                "customer asks what the company does, allows, requires, or charges "
+                f"for beyond their quote. Returns up to {MAX_RESULTS} entries, or none "
+                "if this company has published nothing on the subject."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "The customer's question or the topic to look up, in their "
+                            "own words (e.g. 'certificate of insurance for my "
+                            "building'). A short phrase, not a whole conversation."
+                        ),
+                    }
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+        search_company_knowledge,
     ),
 }
 
@@ -264,16 +355,19 @@ class ToolExecutor:
             raise UnknownToolError(f"Unknown tool: {tool_name}")
 
         schema, handler = entry
-        self._validate_arguments(tool_name, schema, arguments or {})
+        supplied = arguments or {}
+        self._validate_arguments(tool_name, schema, supplied)
 
-        result = handler(self._db, self._context)
+        # Handlers receive the validated business arguments and nothing else. Identity
+        # travels only in ``self._context``, which no caller of ``execute`` can set.
+        result = handler(self._db, self._context, supplied)
         return dict(result.model_dump(mode="json"))
 
     @staticmethod
     def _validate_arguments(
         tool_name: str, schema: dict[str, Any], arguments: dict[str, Any]
     ) -> None:
-        """Reject identifiers first, then anything outside the declared schema."""
+        """Reject identifiers first, then unexpected keys, then missing required ones."""
         supplied = set(arguments)
 
         # Checked before the schema so the log and the message name the real problem:
@@ -290,9 +384,18 @@ class ToolExecutor:
                 "scope is determined by the server"
             )
 
-        allowed = set(schema["input_schema"].get("properties", {}))
+        input_schema = schema["input_schema"]
+        allowed = set(input_schema.get("properties", {}))
         unexpected = sorted(supplied - allowed)
         if unexpected:
             raise ToolArgumentError(
                 f"{tool_name} does not accept argument(s): {', '.join(unexpected)}"
+            )
+
+        # Enforced here rather than left to the handler so every tool's required
+        # arguments are guaranteed present by the time it runs.
+        missing = sorted(set(input_schema.get("required", [])) - supplied)
+        if missing:
+            raise ToolArgumentError(
+                f"{tool_name} requires argument(s): {', '.join(missing)}"
             )

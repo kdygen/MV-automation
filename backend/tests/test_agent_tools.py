@@ -95,11 +95,19 @@ class TestToolSchemas:
                 f"{schema['name']} exposes {forbidden} to the model"
             )
 
-    def test_all_tools_take_no_arguments_in_1b(self) -> None:
+    def test_no_tool_accepts_more_than_its_declared_arguments(self) -> None:
+        """Unknown keys must fail validation, not be silently ignored."""
         for schema in TOOL_SCHEMAS:
-            assert schema["input_schema"]["properties"] == {}
-            # Unknown keys must fail validation, not be silently ignored.
             assert schema["input_schema"]["additionalProperties"] is False
+
+    def test_only_the_knowledge_tool_takes_an_argument(self) -> None:
+        """The 1B tools stay zero-argument; 3A's addition is a search string, not an id."""
+        with_arguments = {
+            schema["name"]: set(schema["input_schema"]["properties"])
+            for schema in TOOL_SCHEMAS
+            if schema["input_schema"]["properties"]
+        }
+        assert with_arguments == {"search_company_knowledge": {"query"}}
 
     def test_schemas_cover_exactly_the_registry(self) -> None:
         assert {s["name"] for s in TOOL_SCHEMAS} == set(TOOL_REGISTRY)
@@ -107,6 +115,7 @@ class TestToolSchemas:
             "get_quote_summary",
             "get_move_details",
             "get_company_info",
+            "search_company_knowledge",
         }
 
     def test_every_identifier_is_on_the_forbidden_list(self) -> None:
@@ -328,8 +337,10 @@ class TestReadOnly:
         quote = bound["quote"]
         before = (quote.status, quote.amount_min_cents, _as_utc(quote.valid_until))
 
+        # Arguments per tool: only the knowledge search takes one.
         for name in TOOL_REGISTRY:
-            bound["executor"].execute(name)
+            arguments = {"query": "cancellation"} if name == "search_company_knowledge" else None
+            bound["executor"].execute(name, arguments)
 
         db.expire_all()
         refreshed = db.get(type(quote), quote.id)

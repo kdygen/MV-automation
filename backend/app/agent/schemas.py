@@ -101,3 +101,32 @@ class CompanyInfo(BaseModel):
     phone: str | None
     email: str | None
     quote_validity_days: int
+
+
+class KnowledgeEntry(BaseModel):
+    """One company knowledge answer the agent may quote from.
+
+    Only the three human-readable fields cross the boundary. ``id``, ``company_id``,
+    ``is_active``, timestamps, the curated ``keywords`` (an internal retrieval aid), and
+    the match score are all withheld: none of them helps answer a customer's question,
+    and every one of them is something the model could otherwise repeat back.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    category: str
+    title: str
+    content: str
+
+
+class KnowledgeResults(BaseModel):
+    """Result of a knowledge search — possibly empty.
+
+    An empty ``results`` tuple is a meaningful answer, not a failure: it tells the agent
+    this company has published nothing on the subject, so it must say so rather than
+    invent a policy.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    results: tuple[KnowledgeEntry, ...]

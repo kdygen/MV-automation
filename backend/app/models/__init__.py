@@ -7,6 +7,7 @@ model modules to the imports below.
 
 from app.models.booking import Booking, BookingStatus
 from app.models.company import Company
+from app.models.company_knowledge import CompanyKnowledge
 from app.models.conversation import (
     Conversation,
     ConversationStatus,
@@ -30,6 +31,7 @@ __all__ = [
     "Booking",
     "BookingStatus",
     "Company",
+    "CompanyKnowledge",
     "Conversation",
     "ConversationStatus",
     "ExtractionSource",

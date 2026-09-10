@@ -31,8 +31,9 @@ from app.core.config import Settings, get_settings
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import create_app
-from app.models import Company, User, UserRole
+from app.models import Company, CompanyKnowledge, User, UserRole
 from app.providers.email import FakeEmailProvider
+from scripts.seed_dev import SEED_KNOWLEDGE
 
 TEST_JWT_SECRET = "test-secret-not-for-production-0123456789abcdef"
 
@@ -107,6 +108,19 @@ def company(db: Session) -> Company:
     db.add(c)
     db.commit()
     return c
+
+
+@pytest.fixture()
+def knowledge(db: Session, company: Company) -> list[CompanyKnowledge]:
+    """Load the demo knowledge base for ``company``.
+
+    Imported from the dev seed rather than re-written here, so the entries developers
+    actually run against are the ones the search tests exercise.
+    """
+    entries = [CompanyKnowledge(company_id=company.id, **entry) for entry in SEED_KNOWLEDGE]
+    db.add_all(entries)
+    db.commit()
+    return entries
 
 
 @pytest.fixture()
