@@ -68,6 +68,23 @@ class RateLimitError(AppError):
     status_code = status.HTTP_429_TOO_MANY_REQUESTS
 
 
+class UpstreamError(AppError):
+    """An upstream dependency answered, but unusably.
+
+    Public message stays generic: upstream detail is for our logs, not the customer.
+    """
+
+    code = "upstream_error"
+    status_code = status.HTTP_502_BAD_GATEWAY
+
+
+class ServiceUnavailableError(AppError):
+    """A dependency this request needs is unreachable or unconfigured."""
+
+    code = "service_unavailable"
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+
 def _error_body(code: str, message: str) -> dict[str, dict[str, str]]:
     return {"error": {"code": code, "message": message}}
 
@@ -77,8 +94,12 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(AppError)
     async def _handle_app_error(_: Request, exc: AppError) -> JSONResponse:
-        # 5xx would be a bug; AppError is always a client-facing 4xx, log at info.
-        logger.info("AppError %s: %s", exc.code, exc.message)
+        # 4xx is normal client behaviour (info); 5xx means a dependency of ours failed
+        # and someone should see it, so it must not hide at info level.
+        if exc.status_code >= 500:
+            logger.error("AppError %s (%s): %s", exc.code, exc.status_code, exc.message)
+        else:
+            logger.info("AppError %s: %s", exc.code, exc.message)
         return JSONResponse(
             status_code=exc.status_code,
             content=_error_body(exc.code, exc.message),

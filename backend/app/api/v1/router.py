@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends
 
 from app.api.deps import CurrentUser, get_current_user
 from app.api.v1.bookings import router as bookings_router
+from app.api.v1.chat import router as chat_router
 from app.api.v1.jobs import router as jobs_router
 from app.api.v1.leads import router as leads_router
 from app.api.v1.public import router as public_router
@@ -19,6 +20,7 @@ from app.api.v1.settings import router as settings_router
 
 api_router = APIRouter()
 api_router.include_router(public_router)
+api_router.include_router(chat_router)
 api_router.include_router(quotes_router)
 api_router.include_router(leads_router)
 api_router.include_router(bookings_router)
