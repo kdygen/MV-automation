@@ -9,6 +9,7 @@
 import type {
   AcceptQuoteResponse,
   ApiErrorBody,
+  ChatReply,
   IntakeResponse,
   MovingRequestIn,
   QuotePublic,
@@ -79,5 +80,19 @@ export function acceptQuote(token: string): Promise<AcceptQuoteResponse> {
 export function declineQuote(token: string): Promise<QuotePublic> {
   return request<QuotePublic>(`/public/quotes/${encodeURIComponent(token)}/decline`, {
     method: "POST",
+  });
+}
+
+/**
+ * Send one message to the post-quote assistant.
+ *
+ * The body carries the message and nothing else — scope comes from the token in the
+ * URL, which the backend resolves server-side. No identifiers, model names, or
+ * credentials are ever sent from the browser.
+ */
+export function sendQuoteChatMessage(token: string, message: string): Promise<ChatReply> {
+  return request<ChatReply>(`/public/quotes/${encodeURIComponent(token)}/chat`, {
+    method: "POST",
+    body: JSON.stringify({ message }),
   });
 }

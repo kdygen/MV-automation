@@ -95,3 +95,7 @@ export interface AcceptQuoteResponse {
 export interface ApiErrorBody {
   error: { code: string; message: string };
 }
+
+export interface ChatReply {
+  reply: string;
+}

@@ -12,6 +12,7 @@ import { ApiError, acceptQuote, declineQuote, getQuote } from "@/lib/api";
 import { dollarRange, dollars, longDate } from "@/lib/format";
 import type { AcceptQuoteResponse, QuotePublic } from "@/lib/types";
 import { Button, Card, ErrorBanner } from "@/components/ui";
+import { ChatPanel } from "@/components/chat";
 
 export default function QuotePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
@@ -141,6 +142,8 @@ export default function QuotePage({ params }: { params: Promise<{ token: string 
           )}
         </div>
       </Card>
+
+      <ChatPanel token={token} />
     </main>
   );
 }
