@@ -1,4 +1,11 @@
-"""Company knowledge search — deterministic keyword matching, no embeddings.
+"""Company knowledge: search for the agent, CRUD for the dashboard.
+
+Both live here because they are two views of one table and share its tenant rule:
+``company_id`` is always passed in by the caller from server-owned identity — the
+authenticated user for dashboard writes, :class:`~app.agent.context.AgentContext` for
+agent reads — and never derived from client input.
+
+Search — deterministic keyword matching, no embeddings.
 
 Answers questions the quote itself cannot ("do you provide a COI?", "what's your
 cancellation policy?") by scoring a tenant's curated knowledge entries against the
@@ -28,9 +35,110 @@ import uuid
 from dataclasses import dataclass
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.errors import ConflictError, NotFoundError
 from app.models import CompanyKnowledge
+from app.schemas.knowledge import (
+    KnowledgeEntryIn,
+    KnowledgeEntryOut,
+    KnowledgeEntryPatch,
+    StarterTopicOut,
+)
+
+#: The category vocabulary offered in the dashboard. Free text at the database level —
+#: this is a suggestion list, not a constraint — but a shared vocabulary keeps the
+#: category weight in scoring meaningful and groups the dashboard sensibly.
+KNOWLEDGE_CATEGORIES: tuple[str, ...] = (
+    "insurance",
+    "packing",
+    "special_items",
+    "policy",
+    "access",
+    "payment",
+    "service_area",
+    "scope",
+)
+
+#: Onboarding templates: the questions customers actually ask, with the curated search
+#: vocabulary already filled in. Deliberately carries **no** ``content`` — every
+#: business fact is the company's to write. Serving these from the backend keeps one
+#: source of truth for the category vocabulary that scoring depends on.
+STARTER_TOPICS: tuple[StarterTopicOut, ...] = (
+    StarterTopicOut(
+        category="insurance",
+        title="Certificate of Insurance",
+        prompt="Do you provide Certificates of Insurance (COIs)?",
+        keywords="COI, certificate of insurance, building management, liability",
+    ),
+    StarterTopicOut(
+        category="packing",
+        title="Packing services and materials",
+        prompt="Do you offer packing services and packing materials?",
+        keywords="packing, boxes, cartons, tape, bubble wrap, supplies, materials",
+    ),
+    StarterTopicOut(
+        category="special_items",
+        title="Pianos and heavy items",
+        prompt="Do you move pianos or other heavy/special items?",
+        keywords="piano, safe, pool table, gym equipment, oversized, heavy, fragile",
+    ),
+    StarterTopicOut(
+        category="policy",
+        title="Cancellation policy",
+        prompt="What is your cancellation policy?",
+        keywords="cancel, cancellation, refund, deposit back, call off",
+    ),
+    StarterTopicOut(
+        category="policy",
+        title="Rescheduling policy",
+        prompt="What is your rescheduling policy?",
+        keywords="reschedule, change date, move date, postpone, delay",
+    ),
+    StarterTopicOut(
+        category="access",
+        title="Stairs",
+        prompt="Are there extra fees for stairs?",
+        keywords="stairs, flights, walk up, no elevator, third floor, extra fee",
+    ),
+    StarterTopicOut(
+        category="access",
+        title="Elevators and freight elevators",
+        prompt="Do customers need to reserve an elevator or freight elevator?",
+        keywords="elevator, lift, freight elevator, service elevator, reserve, booking",
+    ),
+    StarterTopicOut(
+        category="service_area",
+        title="Areas we serve",
+        prompt="What areas do you serve?",
+        keywords="areas, service area, coverage, how far, long distance, out of state",
+    ),
+    StarterTopicOut(
+        category="payment",
+        title="Deposits and payment",
+        prompt="Do you require a deposit, and how can customers pay?",
+        keywords="deposit, pay, payment, credit card, cash, e-transfer, invoice, tip",
+    ),
+    StarterTopicOut(
+        category="policy",
+        title="If the move takes longer than estimated",
+        prompt="What happens if the move takes longer than estimated?",
+        keywords="longer, overtime, over estimate, extra hours, go over, final price",
+    ),
+    StarterTopicOut(
+        category="access",
+        title="Parking and loading",
+        prompt="What parking or loading access should customers arrange?",
+        keywords="parking, loading dock, permit, driveway, street, truck access, distance to door",
+    ),
+    StarterTopicOut(
+        category="scope",
+        title="What is not included in a quote",
+        prompt="What is not included in a standard quote?",
+        keywords="not included, excluded, extra, additional charge, surcharge, disassembly",
+    ),
+)
 
 #: How many entries the agent may see for one question. Enough to cover a question that
 #: spans two policies, small enough that the model is not handed the whole knowledge
@@ -171,3 +279,147 @@ def search_knowledge(
     # Title is the tiebreaker purely so equal-scoring results have a stable order.
     scored.sort(key=lambda match: (-match.score, match.title))
     return scored[:limit]
+
+
+# ---------------------------------------------------------------------------
+# Dashboard CRUD
+#
+# Every function takes ``company_id`` as its second argument, supplied by the router
+# from the authenticated user. There is no code path that reads a company from a
+# request body or a path parameter.
+# ---------------------------------------------------------------------------
+
+
+def _normalize_keywords(value: str | None) -> str | None:
+    """Store an omitted or cleared keywords field as NULL, never as an empty string.
+
+    Pydantic has already trimmed it; this collapses ``""`` to ``None`` so "no keywords"
+    has exactly one representation in the database.
+    """
+    return value or None
+
+
+def _get_owned(db: Session, company_id: uuid.UUID, entry_id: uuid.UUID) -> CompanyKnowledge:
+    """Load one entry, or raise ``NotFoundError``.
+
+    The tenant predicate is part of the lookup rather than a check afterwards, so an
+    entry belonging to another company is indistinguishable from one that does not
+    exist. Returning 404 rather than 403 matters: 403 would confirm the id is real and
+    turn this endpoint into an enumeration oracle.
+    """
+    entry = db.scalar(
+        select(CompanyKnowledge).where(
+            CompanyKnowledge.id == entry_id,
+            CompanyKnowledge.company_id == company_id,
+        )
+    )
+    if entry is None:
+        raise NotFoundError("Knowledge entry not found")
+    return entry
+
+
+def _duplicate_title(
+    db: Session,
+    company_id: uuid.UUID,
+    title: str,
+    *,
+    exclude_id: uuid.UUID | None = None,
+) -> bool:
+    query = select(CompanyKnowledge.id).where(
+        CompanyKnowledge.company_id == company_id,
+        CompanyKnowledge.title == title,
+    )
+    if exclude_id is not None:
+        query = query.where(CompanyKnowledge.id != exclude_id)
+    return db.scalar(query) is not None
+
+
+def _commit(db: Session, title: str) -> None:
+    """Commit, translating the unique-title violation into a 409.
+
+    The pre-checks give a clear message in the normal case; this is what actually holds
+    under a race, since only the database can decide uniqueness atomically.
+    """
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise ConflictError(f"An entry titled {title!r} already exists") from exc
+
+
+def list_entries(db: Session, company_id: uuid.UUID) -> list[KnowledgeEntryOut]:
+    """Every entry for this company, active and inactive, grouped-friendly ordered.
+
+    Inactive entries are included deliberately: the dashboard is where an owner
+    re-activates something, so hiding them would strand them.
+    """
+    entries = db.scalars(
+        select(CompanyKnowledge)
+        .where(CompanyKnowledge.company_id == company_id)
+        .order_by(CompanyKnowledge.category, CompanyKnowledge.title)
+    )
+    return [KnowledgeEntryOut.model_validate(entry) for entry in entries]
+
+
+def create_entry(
+    db: Session, company_id: uuid.UUID, payload: KnowledgeEntryIn
+) -> KnowledgeEntryOut:
+    """Create one entry for this company. Title must be unique within the tenant."""
+    if _duplicate_title(db, company_id, payload.title):
+        raise ConflictError(f"An entry titled {payload.title!r} already exists")
+
+    entry = CompanyKnowledge(
+        company_id=company_id,
+        category=payload.category,
+        title=payload.title,
+        content=payload.content,
+        keywords=_normalize_keywords(payload.keywords),
+        is_active=payload.is_active,
+    )
+    db.add(entry)
+    _commit(db, payload.title)
+    db.refresh(entry)
+    return KnowledgeEntryOut.model_validate(entry)
+
+
+def update_entry(
+    db: Session,
+    company_id: uuid.UUID,
+    entry_id: uuid.UUID,
+    patch: KnowledgeEntryPatch,
+) -> KnowledgeEntryOut:
+    """Apply a partial update. Unset fields are left alone; ``None`` clears keywords."""
+    entry = _get_owned(db, company_id, entry_id)
+    # exclude_unset distinguishes "not sent" from "sent as null" — the only way a
+    # PATCH can both leave keywords alone and clear them.
+    changes = patch.model_dump(exclude_unset=True)
+
+    if "title" in changes and _duplicate_title(
+        db, company_id, changes["title"], exclude_id=entry.id
+    ):
+        raise ConflictError(f"An entry titled {changes['title']!r} already exists")
+    if "keywords" in changes:
+        changes["keywords"] = _normalize_keywords(changes["keywords"])
+
+    for field, value in changes.items():
+        setattr(entry, field, value)
+
+    _commit(db, entry.title)
+    db.refresh(entry)
+    return KnowledgeEntryOut.model_validate(entry)
+
+
+def delete_entry(db: Session, company_id: uuid.UUID, entry_id: uuid.UUID) -> None:
+    """Permanently remove one entry.
+
+    Safe to hard-delete, unlike quotes or jobs: nothing references a knowledge row, and
+    it carries no audit obligation. Deactivating (``is_active = false``) is the
+    reversible option the dashboard puts first.
+    """
+    db.delete(_get_owned(db, company_id, entry_id))
+    db.commit()
+
+
+def list_starter_topics() -> list[StarterTopicOut]:
+    """Onboarding templates. Static, tenant-independent, and answer-free."""
+    return list(STARTER_TOPICS)

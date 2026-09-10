@@ -15,6 +15,9 @@ import type {
   CompleteBookingPayload,
   ImportResult,
   JobRow,
+  KnowledgeEntry,
+  KnowledgeEntryPatch,
+  KnowledgeEntryPayload,
   LeadDetail,
   LeadRow,
   Me,
@@ -22,6 +25,7 @@ import type {
   PricingSettings,
   QuoteAdmin,
   QuoteRow,
+  StarterTopic,
 } from "./dashboard-types";
 
 const API_BASE =
@@ -82,6 +86,8 @@ async function authed<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(code, message, response.status);
   }
+  // 204 has no body; parsing it would throw. Callers of such endpoints use Promise<void>.
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
 
@@ -157,3 +163,18 @@ export async function importJobsCsv(file: File): Promise<ImportResult> {
   }
   return (await response.json()) as ImportResult;
 }
+
+export const listKnowledge = () => authed<KnowledgeEntry[]>("/knowledge");
+export const listStarterTopics = () => authed<StarterTopic[]>("/knowledge/starters");
+
+export const createKnowledge = (payload: KnowledgeEntryPayload) =>
+  authed<KnowledgeEntry>("/knowledge", { method: "POST", body: JSON.stringify(payload) });
+
+export const updateKnowledge = (id: string, patch: KnowledgeEntryPatch) =>
+  authed<KnowledgeEntry>(`/knowledge/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+
+export const deleteKnowledge = (id: string) =>
+  authed<void>(`/knowledge/${id}`, { method: "DELETE" });

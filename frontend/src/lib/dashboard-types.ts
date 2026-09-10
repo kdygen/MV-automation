@@ -164,3 +164,37 @@ export interface CompleteBookingPayload {
   actual_volume_cuft?: number | null;
   notes?: string | null;
 }
+
+/** One company knowledge entry as the dashboard sees it (backend: KnowledgeEntryOut). */
+export interface KnowledgeEntry {
+  id: string;
+  category: string;
+  title: string;
+  content: string;
+  keywords: string | null;
+  is_active: boolean;
+  updated_at: string;
+}
+
+/** POST body. `company_id` is deliberately absent — the backend derives it from auth. */
+export interface KnowledgeEntryPayload {
+  category: string;
+  title: string;
+  content: string;
+  keywords?: string | null;
+  is_active?: boolean;
+}
+
+/** PATCH body — only the fields being changed. */
+export type KnowledgeEntryPatch = Partial<KnowledgeEntryPayload>;
+
+/**
+ * An onboarding template: a question customers ask, plus the search vocabulary for it.
+ * Carries no `content` — the owner writes every business fact themselves.
+ */
+export interface StarterTopic {
+  category: string;
+  title: string;
+  prompt: string;
+  keywords: string;
+}
