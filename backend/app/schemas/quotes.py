@@ -44,6 +44,12 @@ class QuotePublicOut(BaseModel):
     origin_city: str
     destination_city: str
     home_size: str
+    #: Which revision the customer is looking at; 1 unless they have edited the move.
+    revision: int = 1
+    #: Deposit due to book, in cents. ``0`` means this company books without payment,
+    #: which is what tells the frontend whether to render "Accept & book" or
+    #: "Accept & pay". The browser never sends this value back.
+    deposit_cents: int = 0
 
 
 class AcceptQuoteResponse(BaseModel):
@@ -81,3 +87,25 @@ class QuoteAdminOut(BaseModel):
     valid_until: datetime
     accepted_at: datetime | None
     created_at: datetime
+
+
+class CheckoutOut(BaseModel):
+    """Where to send the customer to pay. No amount is accepted *from* the browser."""
+
+    checkout_url: str
+    amount_cents: int
+    currency: str
+
+
+class PaymentStatusOut(BaseModel):
+    """What the return page polls while the webhook lands.
+
+    ``booking_confirmed`` is the only field that matters, and it is true only once a
+    verified webhook has created the booking. The browser's arrival on the success URL
+    does not set it.
+    """
+
+    status: str
+    booking_confirmed: bool
+    amount_cents: int | None = None
+    currency: str | None = None

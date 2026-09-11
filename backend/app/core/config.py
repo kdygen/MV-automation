@@ -53,6 +53,17 @@ class Settings(BaseSettings):
     email_api_key: str = ""
     email_from: str = "quotes@example.com"
 
+    # --- Payments ---
+    #: "fake" (offline, used by every test and by local development) or "stripe".
+    payment_provider: str = "fake"
+    stripe_secret_key: str = ""
+    #: Signing secret for the webhook endpoint. Without it a signed event cannot be
+    #: verified, and an unverified event is never acted on.
+    stripe_webhook_secret: str = ""
+    #: Where Stripe returns the customer. ``{token}`` is substituted per quote.
+    payment_success_path: str = "/quote/{token}/paid"
+    payment_cancel_path: str = "/quote/{token}"
+
     # --- LLM / agent ---
     openai_api_key: str = ""
     agent_model: str = "gpt-5-mini"

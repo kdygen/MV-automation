@@ -2,16 +2,24 @@
 
 /**
  * Customer quote page (`/quote/{token}`): the tokenized link from the quote email.
- * Shows the estimate breakdown and lets the customer accept (creating a booking) or
- * decline. Handles expired/declined/already-accepted states.
+ *
+ * Shows the estimate and the deterministic controls that can change it — change date,
+ * edit details, accept. Every one of those calls a backend endpoint that re-validates
+ * from scratch; nothing on this page decides a price, a date's availability, or
+ * whether a payment succeeded.
+ *
+ * The assistant can open the same panels via `ui_action`, but it opens *these* panels.
+ * There is no AI-specific business logic anywhere on this page.
  */
 
 import { use, useCallback, useEffect, useState } from "react";
 
-import { ApiError, acceptQuote, declineQuote, getQuote } from "@/lib/api";
+import { ApiError, acceptQuote, declineQuote, getQuote, startCheckout } from "@/lib/api";
 import { dollarRange, dollars, longDate } from "@/lib/format";
+import { type FlowKey, quoteActions } from "@/lib/actions";
 import type { AcceptQuoteResponse, QuotePublic } from "@/lib/types";
 import { Button, Card, ErrorBanner } from "@/components/ui";
+import { ChangeDatePanel, EditMovePanel } from "@/components/quote-change";
 import { ChatPanel } from "@/components/chat";
 
 export default function QuotePage({ params }: { params: Promise<{ token: string }> }) {
@@ -21,6 +29,7 @@ export default function QuotePage({ params }: { params: Promise<{ token: string 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [flow, setFlow] = useState<FlowKey | null>(null);
 
   useEffect(() => {
     getQuote(token)
@@ -34,29 +43,63 @@ export default function QuotePage({ params }: { params: Promise<{ token: string 
       );
   }, [token]);
 
-  const act = useCallback(
-    async (action: "accept" | "decline") => {
-      setBusy(true);
-      setActionError(null);
-      try {
-        if (action === "accept") {
-          setBooking(await acceptQuote(token));
-          setQuote((q) => (q ? { ...q, status: "accepted" } : q));
-        } else {
-          setQuote(await declineQuote(token));
-        }
-      } catch (err) {
-        setActionError(
-          err instanceof ApiError ? err.message : "Something went wrong. Please try again.",
-        );
-        // Status may have changed server-side (e.g. expired) — refresh.
-        getQuote(token).then(setQuote).catch(() => {});
-      } finally {
-        setBusy(false);
+  /**
+   * Accept, or start checkout when the company takes a deposit.
+   *
+   * Which of the two happens is decided by `deposit_cents` on the quote payload — a
+   * server-computed value. The browser never chooses whether payment applies, and
+   * never sends an amount.
+   */
+  const accept = useCallback(async () => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      if (quote && quote.deposit_cents > 0) {
+        const { checkout_url: url } = await startCheckout(token);
+        window.location.href = url;
+        return;
       }
-    },
-    [token],
-  );
+      setBooking(await acceptQuote(token));
+      setQuote((q) => (q ? { ...q, status: "accepted" } : q));
+    } catch (err) {
+      setActionError(
+        err instanceof ApiError ? err.message : "Something went wrong. Please try again.",
+      );
+      getQuote(token).then(setQuote).catch(() => {});
+    } finally {
+      setBusy(false);
+    }
+  }, [token, quote]);
+
+  const decline = useCallback(async () => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      setQuote(await declineQuote(token));
+    } catch (err) {
+      setActionError(
+        err instanceof ApiError ? err.message : "Something went wrong. Please try again.",
+      );
+      getQuote(token).then(setQuote).catch(() => {});
+    } finally {
+      setBusy(false);
+    }
+  }, [token]);
+
+  /** A change was confirmed: the response is already the new revision. */
+  const onChanged = useCallback((updated: QuotePublic) => {
+    setQuote(updated);
+    setFlow(null);
+    setActionError(null);
+  }, []);
+
+  const openFlow = useCallback((next: FlowKey | null) => {
+    if (next === "accept") return; // handled by the accept button itself
+    setFlow(next);
+    if (next && typeof document !== "undefined") {
+      document.getElementById("quote-actions")?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, []);
 
   if (loadError) {
     return (
@@ -72,6 +115,9 @@ export default function QuotePage({ params }: { params: Promise<{ token: string 
       </main>
     );
   }
+
+  const isLive = quote.status === "sent";
+  const actions = quoteActions(quote);
 
   return (
     <main className="mx-auto max-w-xl px-4 py-10">
@@ -91,6 +137,9 @@ export default function QuotePage({ params }: { params: Promise<{ token: string 
           <p className="mt-1 text-xs text-slate-500">
             {quote.origin_city} → {quote.destination_city} on {longDate(quote.move_date)}
           </p>
+          {quote.revision > 1 ? (
+            <p className="mt-1 text-xs text-slate-400">Updated estimate (v{quote.revision})</p>
+          ) : null}
         </div>
 
         <dl className="mt-6 divide-y divide-slate-100 border-t border-slate-100">
@@ -131,19 +180,60 @@ export default function QuotePage({ params }: { params: Promise<{ token: string 
               This quote has expired. Please submit a new request for updated pricing.
             </p>
           ) : (
-            <div className="flex justify-center gap-3">
-              <Button onClick={() => act("accept")} disabled={busy}>
-                {busy ? "Working…" : "Accept & book my move"}
-              </Button>
-              <Button variant="danger" onClick={() => act("decline")} disabled={busy}>
-                Decline
-              </Button>
+            <div id="quote-actions" className="space-y-3">
+              <div className="flex flex-wrap justify-center gap-2">
+                {actions
+                  .filter((cta) => cta.flow !== "accept")
+                  .map((cta) => (
+                    <Button
+                      key={cta.action}
+                      variant="secondary"
+                      onClick={() => openFlow(cta.flow)}
+                      disabled={busy}
+                    >
+                      {cta.label}
+                    </Button>
+                  ))}
+              </div>
+              <div className="flex flex-wrap justify-center gap-3">
+                <Button onClick={accept} disabled={busy}>
+                  {busy
+                    ? "Working…"
+                    : actions.find((a) => a.flow === "accept")?.label ?? "Accept"}
+                </Button>
+                <Button variant="danger" onClick={decline} disabled={busy}>
+                  Decline
+                </Button>
+              </div>
+              {quote.deposit_cents > 0 ? (
+                <p className="text-center text-xs text-slate-500">
+                  A {dollars(quote.deposit_cents)} deposit holds your date. You&apos;ll pay
+                  securely on the next screen.
+                </p>
+              ) : null}
             </div>
           )}
         </div>
       </Card>
 
-      <ChatPanel token={token} />
+      {isLive && flow === "date" ? (
+        <div className="mt-6">
+          <ChangeDatePanel
+            token={token}
+            quote={quote}
+            onDone={onChanged}
+            onClose={() => setFlow(null)}
+          />
+        </div>
+      ) : null}
+
+      {isLive && flow === "edit" ? (
+        <div className="mt-6">
+          <EditMovePanel token={token} onDone={onChanged} onClose={() => setFlow(null)} />
+        </div>
+      ) : null}
+
+      <ChatPanel token={token} quote={quote} onAction={openFlow} onAccept={accept} />
     </main>
   );
 }

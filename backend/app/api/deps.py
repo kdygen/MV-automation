@@ -24,9 +24,16 @@ from app.db.session import get_db
 from app.models.user import User, UserRole
 from app.providers.distance import DistanceProvider, get_distance_provider
 from app.providers.email import FakeEmailProvider, ResendEmailProvider, get_email_provider
+from app.providers.payment import (
+    FakePaymentProvider,
+    StripePaymentProvider,
+    get_payment_provider,
+)
 
 # What the email dependency can hand out (fake in dev/tests, Resend in production).
 AnyEmailProvider = FakeEmailProvider | ResendEmailProvider
+# Fake offline in dev and every test; Stripe in production.
+AnyPaymentProvider = FakePaymentProvider | StripePaymentProvider
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -39,6 +46,11 @@ def distance_provider_dep(settings: Settings = Depends(get_settings)) -> Distanc
 def email_provider_dep(settings: Settings = Depends(get_settings)) -> AnyEmailProvider:
     """Resolve the configured email provider (overridden in tests)."""
     return get_email_provider(settings)
+
+
+def payment_provider_dep(settings: Settings = Depends(get_settings)) -> AnyPaymentProvider:
+    """Resolve the configured payment provider (overridden in tests)."""
+    return get_payment_provider(settings)
 
 
 def quote_public_url(settings: Settings, token: str) -> str:

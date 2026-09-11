@@ -9,11 +9,17 @@
  *
  * Deliberately simple for V1: no streaming, no markdown, no history fetch, no
  * persistence. The opening greeting is local, so opening the page costs nothing.
+ *
+ * A reply may carry a `ui_action`. Rendering it opens the *same* panel the permanent
+ * quote-page button opens — this component holds no business logic of its own, and an
+ * unrecognised action renders nothing rather than guessing.
  */
 
 import { useEffect, useRef, useState } from "react";
 
 import { sendQuoteChatMessage } from "@/lib/api";
+import { type FlowKey, ctaFor } from "@/lib/actions";
+import type { QuotePublic } from "@/lib/types";
 import {
   type ChatMessage,
   MAX_CHAT_MESSAGE_LENGTH,
@@ -26,7 +32,19 @@ import {
 } from "@/lib/chat";
 import { Button } from "@/components/ui";
 
-export function ChatPanel({ token }: { token: string }) {
+export function ChatPanel({
+  token,
+  quote,
+  onAction,
+  onAccept,
+}: {
+  token: string;
+  quote: Pick<QuotePublic, "deposit_cents" | "status">;
+  /** Opens a deterministic flow on the quote page. */
+  onAction: (flow: FlowKey | null) => void;
+  /** The quote page's own accept handler — reused verbatim, never reimplemented. */
+  onAccept: () => void;
+}) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -54,10 +72,10 @@ export function ChatPanel({ token }: { token: string }) {
     setSending(true);
 
     try {
-      const { reply } = await sendQuoteChatMessage(token, text);
+      const { reply, ui_action: uiAction } = await sendQuoteChatMessage(token, text);
       setMessages((current) => [
         ...current,
-        { id: nextMessageId("assistant"), role: "assistant", text: reply },
+        { id: nextMessageId("assistant"), role: "assistant", text: reply, uiAction },
       ]);
     } catch (err) {
       // No fabricated assistant turn: the customer's message stays visible and the
@@ -76,7 +94,8 @@ export function ChatPanel({ token }: { token: string }) {
     <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
       <h2 className="text-base font-semibold text-slate-900">Questions about your move?</h2>
       <p className="mt-1 text-xs text-slate-500">
-        Answers come from your quote details. For changes or booking, contact the company.
+        Answers come from your quote details. To change or book your move, use the buttons
+        above — the assistant can only point you to them.
       </p>
 
       <div
@@ -86,25 +105,41 @@ export function ChatPanel({ token }: { token: string }) {
         aria-label="Conversation"
         className="mt-4 max-h-80 space-y-3 overflow-y-auto"
       >
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            className={message.role === "user" ? "flex justify-end" : "flex justify-start"}
-          >
-            <p
-              className={
-                message.role === "user"
-                  ? "max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-sm bg-blue-600 px-4 py-2 text-sm text-white"
-                  : "max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-bl-sm bg-slate-100 px-4 py-2 text-sm text-slate-800"
-              }
+        {messages.map((message) => {
+          // Null for "none", for an unknown value, and once the quote is no longer
+          // live — a stale hint must never offer a control that would fail.
+          const cta = message.role === "assistant" ? ctaFor(message.uiAction, quote) : null;
+          return (
+            <div
+              key={message.id}
+              className={message.role === "user" ? "flex justify-end" : "flex justify-start"}
             >
-              <span className="sr-only">
-                {message.role === "user" ? "You said: " : "Assistant said: "}
-              </span>
-              {message.text}
-            </p>
-          </div>
-        ))}
+              <div className={message.role === "user" ? "max-w-[85%]" : "max-w-[85%]"}>
+                <p
+                  className={
+                    message.role === "user"
+                      ? "whitespace-pre-wrap break-words rounded-2xl rounded-br-sm bg-blue-600 px-4 py-2 text-sm text-white"
+                      : "whitespace-pre-wrap break-words rounded-2xl rounded-bl-sm bg-slate-100 px-4 py-2 text-sm text-slate-800"
+                  }
+                >
+                  <span className="sr-only">
+                    {message.role === "user" ? "You said: " : "Assistant said: "}
+                  </span>
+                  {message.text}
+                </p>
+                {cta ? (
+                  <button
+                    type="button"
+                    onClick={() => (cta.flow === "accept" ? onAccept() : onAction(cta.flow))}
+                    className="mt-2 rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  >
+                    {cta.label}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
 
         {sending ? (
           <div className="flex justify-start">

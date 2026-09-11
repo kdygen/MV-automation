@@ -102,10 +102,22 @@ def create_quote_for_request(
 
 
 def get_quote_by_token(db: Session, token: str) -> Quote:
-    """Resolve a customer quote link; lazily expires overdue quotes."""
+    """Resolve a customer quote link to the current revision; lazily expires it.
+
+    A token stays with the revision it was issued for, so after a customer edits their
+    move the original emailed link still works — it resolves forward through
+    ``superseded_by_quote_id`` to the head. Expiry is then evaluated on the head, which
+    is the only revision still on offer.
+    """
     quote = db.scalar(select(Quote).where(Quote.public_token == token))
     if quote is None:
         raise NotFoundError("Quote not found")
+
+    # Imported here rather than at module scope: requote depends on this module, and a
+    # top-level import would make the cycle real.
+    from app.services.requote import resolve_head
+
+    quote = resolve_head(db, quote)
     _expire_if_overdue(db, quote)
     return quote
 

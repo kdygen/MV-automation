@@ -17,6 +17,14 @@ export interface ChatMessage {
   id: string;
   role: ChatRole;
   text: string;
+  /**
+   * An allowlisted control the assistant offered with this reply.
+   *
+   * Stored per message rather than on the panel so a button stays attached to the
+   * answer that produced it, and an older suggestion does not linger beside a newer,
+   * unrelated reply.
+   */
+  uiAction?: string;
 }
 
 /**
@@ -30,8 +38,8 @@ export const GREETING =
 
 export const SUGGESTIONS = [
   "How much is my quote?",
-  "How many movers?",
-  "What day is my move?",
+  "Can I change my move date?",
+  "What's your cancellation policy?",
 ] as const;
 
 export function initialMessages(): ChatMessage[] {

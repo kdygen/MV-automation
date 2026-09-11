@@ -130,3 +130,16 @@ class KnowledgeResults(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     results: tuple[KnowledgeEntry, ...]
+
+
+class NextStep(BaseModel):
+    """Result of the navigation-hint tool: the action the frontend should offer.
+
+    Carries the enum value and nothing else — no URL, no button label, no identifier.
+    What the control says and where it leads is the frontend's decision, so the model
+    cannot influence either.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    action: str

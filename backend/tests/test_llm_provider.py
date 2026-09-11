@@ -198,6 +198,7 @@ class TestRequestTranslation:
             "get_move_details",
             "get_company_info",
             "search_company_knowledge",
+            "suggest_next_step",
         }
         for tool in tools:
             assert tool["type"] == "function"
@@ -209,7 +210,8 @@ class TestRequestTranslation:
             # Only keywords known to be accepted in strict mode are sent.
             assert set(schema) <= {"type", "properties", "required", "additionalProperties"}
             for prop in schema["properties"].values():
-                assert set(prop) <= {"type", "description"}
+                # `enum` is part of the documented strict-mode subset; nothing else is used.
+                assert set(prop) <= {"type", "description", "enum"}
 
     def test_no_tool_schema_accepts_an_identifier(self) -> None:
         model, client = make_model([provider_response([message_item(output_text("hi"))])])

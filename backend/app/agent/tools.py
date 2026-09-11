@@ -24,6 +24,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.agent.actions import SELECTABLE_VALUES, UiAction
 from app.agent.context import AgentContext
 from app.agent.errors import ToolArgumentError, ToolExecutionError, UnknownToolError
 from app.agent.model import ToolDefinition
@@ -32,6 +33,7 @@ from app.agent.schemas import (
     KnowledgeEntry,
     KnowledgeResults,
     MoveDetails,
+    NextStep,
     QuoteLineItem,
     QuoteSummary,
     SideAccessInfo,
@@ -234,6 +236,28 @@ def search_company_knowledge(
     )
 
 
+def suggest_next_step(
+    db: Session, context: AgentContext, arguments: dict[str, Any]
+) -> NextStep:
+    """Name the on-screen control the customer should use next.
+
+    The one tool that exists purely to *navigate*. It reads nothing and writes nothing:
+    it validates the requested action against the allowlist and hands the name back.
+    Every state change still happens through a deterministic endpoint the customer
+    triggers themselves, so a model that calls this has changed exactly nothing.
+    """
+    raw = arguments.get("action")
+    if not isinstance(raw, str):
+        raise ToolArgumentError("suggest_next_step requires an action")
+    try:
+        action = UiAction(raw.strip().lower())
+    except ValueError:
+        raise ToolArgumentError(f"Unknown action: {raw}") from None
+    if action.value not in SELECTABLE_VALUES:
+        raise ToolArgumentError(f"Action {action.value} cannot be suggested")
+    return NextStep(action=action.value)
+
+
 #: name → (model-visible JSON Schema, handler). The registry is the allowlist: there is
 #: no dynamic lookup by string anywhere, so the model can only reach these functions.
 TOOL_REGISTRY: dict[
@@ -303,6 +327,33 @@ TOOL_REGISTRY: dict[
         },
         search_company_knowledge,
     ),
+    "suggest_next_step": (
+        {
+            "name": "suggest_next_step",
+            "description": (
+                "Show the customer the on-screen control for what they want to do. "
+                "Call this when they want to change their move date (change_date), "
+                "correct or update move details such as home size, packing, special "
+                "items or access (edit_move), go ahead and book (accept_quote), or "
+                "reach a person at the company (contact_company). This only reveals a "
+                "button — it does not perform the action, so never say the change has "
+                "been made. Do not call it for questions you are simply answering."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": list(SELECTABLE_VALUES),
+                        "description": "Which control to reveal.",
+                    }
+                },
+                "required": ["action"],
+                "additionalProperties": False,
+            },
+        },
+        suggest_next_step,
+    ),
 }
 
 #: The tool definitions a model is shown. Ordering is stable for prompt caching.
@@ -336,6 +387,18 @@ class ToolExecutor:
     def __init__(self, db: Session, context: AgentContext) -> None:
         self._db = db
         self._context = context
+        # Set when a tool returns a navigation hint. Recorded here rather than in the
+        # orchestration loop so the loop never has to know a tool's name — the property
+        # that keeps the allowlist the single place tools are identified.
+        self._suggested_action = UiAction.NONE
+
+    @property
+    def suggested_action(self) -> UiAction:
+        """The action the model asked to reveal this turn, or ``NONE``.
+
+        Last call wins: a model that changes its mind mid-turn gets the later hint.
+        """
+        return self._suggested_action
 
     @property
     def tool_names(self) -> tuple[str, ...]:
@@ -361,7 +424,13 @@ class ToolExecutor:
         # Handlers receive the validated business arguments and nothing else. Identity
         # travels only in ``self._context``, which no caller of ``execute`` can set.
         result = handler(self._db, self._context, supplied)
-        return dict(result.model_dump(mode="json"))
+        payload = dict(result.model_dump(mode="json"))
+
+        # A tool result carrying an allowlisted action is a navigation hint. Matched on
+        # the result's shape, not the tool's name, so the executor stays generic.
+        if isinstance(result, NextStep):
+            self._suggested_action = UiAction(payload["action"])
+        return payload
 
     @staticmethod
     def _validate_arguments(

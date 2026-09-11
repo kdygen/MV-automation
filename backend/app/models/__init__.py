@@ -5,7 +5,9 @@ populated — required for ``create_all`` in tests and for Alembic autogenerate.
 model modules to the imports below.
 """
 
+from app.models.availability import CompanyDateCapacity
 from app.models.booking import Booking, BookingStatus
+from app.models.change_request import ChangeKind, QuoteChangeRequest
 from app.models.company import Company
 from app.models.company_knowledge import CompanyKnowledge
 from app.models.conversation import (
@@ -23,6 +25,7 @@ from app.models.moving_request import (
     PackingService,
     RequestStatus,
 )
+from app.models.payment import Payment, PaymentStatus, ProcessedWebhookEvent
 from app.models.pricing_config import PricingConfigRow
 from app.models.quote import Quote, QuoteStatus
 from app.models.user import User, UserRole
@@ -30,7 +33,9 @@ from app.models.user import User, UserRole
 __all__ = [
     "Booking",
     "BookingStatus",
+    "ChangeKind",
     "Company",
+    "CompanyDateCapacity",
     "CompanyKnowledge",
     "Conversation",
     "ConversationStatus",
@@ -45,8 +50,12 @@ __all__ = [
     "MessageRole",
     "MovingRequest",
     "PackingService",
+    "Payment",
+    "PaymentStatus",
     "PricingConfigRow",
+    "ProcessedWebhookEvent",
     "Quote",
+    "QuoteChangeRequest",
     "QuoteStatus",
     "RequestStatus",
     "User",

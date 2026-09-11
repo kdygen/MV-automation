@@ -5,16 +5,24 @@ The request is deliberately the narrowest possible surface: a single message str
 ``conversation_id`` or any other identifier is **rejected**, not quietly ignored —
 scope comes only from the quote token in the URL.
 
-The response carries only the assistant's reply. ``tools_used`` and
-``conversation_id`` are deliberately absent: the first would disclose internal
+The response carries the assistant's reply and, optionally, one allowlisted
+``ui_action`` naming an on-screen control to offer. ``tools_used`` and
+``conversation_id`` remain deliberately absent: the first would disclose internal
 architecture to anyone probing the endpoint, and the second is an internal identifier
 the frontend does not need, since the token already identifies the quote and each
 quote has exactly one conversation. Both are recorded server-side instead.
+
+``ui_action`` is a *hint*, not a grant. It names a control the customer could already
+reach from the quote page, and every state change behind it still runs through the
+deterministic endpoint that control calls. A tampered or unexpected value simply fails
+to match a known action and renders nothing.
 """
 
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.agent.actions import UiAction
 
 #: Roughly 400 words — ample for a question about a move, while bounding per-call
 #: token cost and abuse. Over-long messages are rejected, never truncated: answering
@@ -39,6 +47,8 @@ class ChatMessageIn(BaseModel):
 
 
 class ChatReplyOut(BaseModel):
-    """What the customer receives: the reply, and nothing else."""
+    """What the customer receives: the reply, plus at most a navigation hint."""
 
     reply: str
+    #: One of :class:`~app.agent.actions.UiAction`; ``"none"`` when nothing is offered.
+    ui_action: str = UiAction.NONE.value

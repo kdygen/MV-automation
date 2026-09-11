@@ -67,7 +67,8 @@ class TestHappyPath:
         resp = client.post(chat_url(quote.public_token), json={"message": "How much is my quote?"})
 
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"reply": "Your estimate is $1,000–$1,300."}
+        # ui_action defaults to "none": a plain answer offers no button.
+        assert resp.json() == {"reply": "Your estimate is $1,000–$1,300.", "ui_action": "none"}
 
     def test_message_is_trimmed_before_reaching_the_agent(
         self, client, db, quote, scripted
@@ -175,9 +176,13 @@ class TestRequestValidation:
 class TestResponseLeakage:
     """Requirement H."""
 
-    def test_response_contains_only_the_reply(self, client, quote, scripted) -> None:
+    def test_response_contains_only_the_reply_and_a_ui_action(
+        self, client, quote, scripted
+    ) -> None:
+        """The surface stays two fields: prose, and at most an allowlisted action name."""
         body = client.post(chat_url(quote.public_token), json={"message": "How much?"}).json()
-        assert set(body) == {"reply"}
+        assert set(body) == {"reply", "ui_action"}
+        assert body["ui_action"] == "none"
 
     def test_response_leaks_no_identifiers_tools_or_token(
         self, client, app, db, company, quote

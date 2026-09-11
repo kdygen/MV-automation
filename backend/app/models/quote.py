@@ -6,7 +6,14 @@ replay the price forever. ``public_token`` is the unguessable key in the custome
 quote link; it is the only way to reach a quote without authentication.
 
 Lifecycle: ``draft`` (awaiting owner review, review-mode companies only) → ``sent`` →
-``accepted`` | ``declined`` | ``expired``.
+``accepted`` | ``declined`` | ``expired`` | ``superseded``.
+
+Quotes are append-only. A customer edit never rewrites a quote: it creates the next
+revision and points the old row at it through ``superseded_by_quote_id``. Every
+revision therefore keeps its own untouched ``inputs_snapshot``, ``engine_version`` and
+``pricing_config_id``, so any price this customer was ever shown can still be replayed
+exactly. The customer's original link keeps working because token lookup follows the
+chain forward to the current head.
 """
 
 from __future__ import annotations
@@ -30,6 +37,7 @@ class QuoteStatus(enum.StrEnum):
     ACCEPTED = "accepted"
     DECLINED = "declined"
     EXPIRED = "expired"
+    SUPERSEDED = "superseded"  # replaced by a later revision after a customer edit
 
 
 class Quote(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -66,6 +74,14 @@ class Quote(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     inputs_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict, nullable=False)
     is_adjusted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    #: 1-based position in this quote's revision chain.
+    revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    #: Set on the older row when a customer edit produces a new revision. NULL marks
+    #: the head — the quote a token lookup ultimately resolves to.
+    superseded_by_quote_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID, ForeignKey("quotes.id", ondelete="SET NULL"), nullable=True
+    )
+
     public_token: Mapped[str] = mapped_column(
         String(64), unique=True, index=True, nullable=False
     )
@@ -73,4 +89,4 @@ class Quote(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:  # pragma: no cover - debug aid
-        return f"<Quote {self.id} status={self.status.value}>"
+        return f"<Quote {self.id} r{self.revision} status={self.status.value}>"

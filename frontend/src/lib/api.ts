@@ -9,9 +9,15 @@
 import type {
   AcceptQuoteResponse,
   ApiErrorBody,
+  AvailabilityResponse,
+  ChangePreview,
   ChatReply,
+  CheckoutResponse,
+  EditMovePayload,
   IntakeResponse,
+  MoveDetails,
   MovingRequestIn,
+  PaymentStatusResponse,
   QuotePublic,
 } from "./types";
 
@@ -95,4 +101,68 @@ export function sendQuoteChatMessage(token: string, message: string): Promise<Ch
     method: "POST",
     body: JSON.stringify({ message }),
   });
+}
+
+/** Which dates this company can take the move on. Read-only. */
+export function getAvailability(
+  token: string,
+  from: string,
+  to: string,
+): Promise<AvailabilityResponse> {
+  const query = new URLSearchParams({ from, to });
+  return request<AvailabilityResponse>(
+    `/public/quotes/${encodeURIComponent(token)}/availability?${query}`,
+  );
+}
+
+/** The priced inputs behind the quote, for the edit form. */
+export function getMoveDetails(token: string): Promise<MoveDetails> {
+  return request<MoveDetails>(`/public/quotes/${encodeURIComponent(token)}/move-details`);
+}
+
+/** Price a proposed change. Writes nothing — safe to call as the customer explores. */
+export function previewDateChange(token: string, moveDate: string): Promise<ChangePreview> {
+  return request<ChangePreview>(`/public/quotes/${encodeURIComponent(token)}/date-preview`, {
+    method: "POST",
+    body: JSON.stringify({ move_date: moveDate }),
+  });
+}
+
+export function previewEdit(token: string, edits: EditMovePayload): Promise<ChangePreview> {
+  return request<ChangePreview>(`/public/quotes/${encodeURIComponent(token)}/edit-preview`, {
+    method: "POST",
+    body: JSON.stringify(edits),
+  });
+}
+
+/** Persist a change the customer has explicitly confirmed. */
+export function confirmDateChange(token: string, moveDate: string): Promise<QuotePublic> {
+  return request<QuotePublic>(`/public/quotes/${encodeURIComponent(token)}/date-change`, {
+    method: "POST",
+    body: JSON.stringify({ move_date: moveDate }),
+  });
+}
+
+export function confirmEdit(token: string, edits: EditMovePayload): Promise<QuotePublic> {
+  return request<QuotePublic>(`/public/quotes/${encodeURIComponent(token)}/edit`, {
+    method: "POST",
+    body: JSON.stringify(edits),
+  });
+}
+
+/**
+ * Begin hosted checkout. Deliberately sends no body: the amount is computed by the
+ * backend from the quote, and nothing the browser could send would be trusted.
+ */
+export function startCheckout(token: string): Promise<CheckoutResponse> {
+  return request<CheckoutResponse>(`/public/quotes/${encodeURIComponent(token)}/checkout`, {
+    method: "POST",
+  });
+}
+
+/** Polled by the return page. Only a verified webhook can make this confirmed. */
+export function getPaymentStatus(token: string): Promise<PaymentStatusResponse> {
+  return request<PaymentStatusResponse>(
+    `/public/quotes/${encodeURIComponent(token)}/payment-status`,
+  );
 }

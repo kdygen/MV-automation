@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from app.agent.actions import UiAction
 from app.agent.context import AgentContext
 from app.agent.errors import AgentLoopError, ModelProtocolError
 from app.agent.model import ChatModel, ModelMessage, TokenUsage, ToolCall
@@ -49,6 +50,9 @@ class AgentTurnResult:
     tools_used: tuple[str, ...]
     iterations: int
     usage: TokenUsage
+    #: A navigation hint for the frontend, or ``NONE``. Read off the executor rather
+    #: than matched here, so this module still names no tool.
+    ui_action: UiAction = UiAction.NONE
 
 
 def _synthesized_call_id(message: Message) -> str:
@@ -216,6 +220,7 @@ def run_agent_turn(
                 tools_used=tuple(tools_used),
                 iterations=iteration,
                 usage=usage,
+                ui_action=executor.suggested_action,
             )
 
         raise ModelProtocolError(

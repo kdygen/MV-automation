@@ -200,4 +200,6 @@ def chat(
         result.usage.output_tokens,
         elapsed_ms,
     )
-    return ChatReplyOut(reply=result.reply)
+    # The action is a name, not a capability: the frontend decides whether to render
+    # it, and the control it opens calls a deterministic endpoint of its own.
+    return ChatReplyOut(reply=result.reply, ui_action=result.ui_action.value)

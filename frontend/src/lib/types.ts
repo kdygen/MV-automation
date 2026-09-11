@@ -70,7 +70,7 @@ export interface IntakeResponse {
 
 export interface QuotePublic {
   company_name: string;
-  status: "sent" | "accepted" | "declined" | "expired" | "draft" | string;
+  status: "sent" | "accepted" | "declined" | "expired" | "draft" | "superseded" | string;
   currency: string;
   amount_min_cents: number;
   amount_max_cents: number;
@@ -82,6 +82,10 @@ export interface QuotePublic {
   origin_city: string;
   destination_city: string;
   home_size: string;
+  /** Which revision this is; > 1 after the customer edited their move. */
+  revision: number;
+  /** Deposit due to book, in cents. 0 means this company books without payment. */
+  deposit_cents: number;
 }
 
 export interface AcceptQuoteResponse {
@@ -98,4 +102,88 @@ export interface ApiErrorBody {
 
 export interface ChatReply {
   reply: string;
+  /** An allowlisted control to offer, or "none". Never a capability — just a name. */
+  ui_action: string;
+}
+
+export interface DayAvailability {
+  date: string;
+  is_available: boolean;
+  reason: string | null;
+}
+
+export interface AvailabilityResponse {
+  days: DayAvailability[];
+  current_move_date: string;
+  first_bookable_date: string;
+  last_bookable_date: string;
+}
+
+export interface QuoteSide {
+  move_date: string;
+  currency: string;
+  amount_min_cents: number;
+  amount_max_cents: number;
+  estimated_hours: number;
+  crew_size: number;
+  line_items: LineItem[];
+}
+
+export interface ChangePreview {
+  current: QuoteSide;
+  proposed: QuoteSide;
+  price_changed: boolean;
+  difference_min_cents: number;
+  difference_max_cents: number;
+  proposed_valid_until: string;
+}
+
+export interface MoveDetails {
+  move_date: string;
+  is_date_flexible: boolean;
+  home_size: string;
+  packing_service: string;
+  special_items: string[];
+  origin_city: string;
+  origin_floor: number;
+  origin_has_elevator: boolean;
+  origin_stairs_flights: number;
+  destination_city: string;
+  destination_floor: number;
+  destination_has_elevator: boolean;
+  destination_stairs_flights: number;
+}
+
+/** Access edits for one end of the move. */
+export interface SideAccessPayload {
+  floor?: number;
+  has_elevator?: boolean;
+  stairs_flights?: number;
+}
+
+/**
+ * Customer edits. Only priced *inputs* — there is deliberately no field for an
+ * amount, a crew size, or an hour count: the engine derives those.
+ */
+export interface EditMovePayload {
+  move_date?: string;
+  home_size?: HomeSize;
+  packing_service?: PackingService;
+  special_items?: string[];
+  is_date_flexible?: boolean;
+  origin?: SideAccessPayload;
+  destination?: SideAccessPayload;
+}
+
+export interface CheckoutResponse {
+  checkout_url: string;
+  amount_cents: number;
+  currency: string;
+}
+
+export interface PaymentStatusResponse {
+  status: "none" | "pending" | "succeeded" | "failed" | "cancelled" | string;
+  booking_confirmed: boolean;
+  amount_cents: number | null;
+  currency: string | null;
 }

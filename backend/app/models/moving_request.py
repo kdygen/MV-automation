@@ -109,6 +109,13 @@ class MovingRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         default=ExtractionSource.FORM,
         nullable=False,
     )
+    #: Set when this request was produced by editing an earlier one. Together with
+    #: ``Quote.superseded_by_quote_id`` this preserves what the customer originally
+    #: asked for, alongside what they changed it to.
+    supersedes_request_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID, ForeignKey("moving_requests.id", ondelete="SET NULL"), nullable=True
+    )
+
     raw_payload: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict, nullable=False)
 
     def __repr__(self) -> str:  # pragma: no cover - debug aid

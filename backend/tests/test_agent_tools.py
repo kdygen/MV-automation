@@ -100,14 +100,25 @@ class TestToolSchemas:
         for schema in TOOL_SCHEMAS:
             assert schema["input_schema"]["additionalProperties"] is False
 
-    def test_only_the_knowledge_tool_takes_an_argument(self) -> None:
-        """The 1B tools stay zero-argument; 3A's addition is a search string, not an id."""
+    def test_arguments_are_a_search_string_and_an_enum_and_nothing_else(self) -> None:
+        """The 1B tools stay zero-argument; later tools take data, never identity."""
         with_arguments = {
             schema["name"]: set(schema["input_schema"]["properties"])
             for schema in TOOL_SCHEMAS
             if schema["input_schema"]["properties"]
         }
-        assert with_arguments == {"search_company_knowledge": {"query"}}
+        assert with_arguments == {
+            "search_company_knowledge": {"query"},
+            "suggest_next_step": {"action"},
+        }
+
+    def test_the_action_argument_is_a_closed_enum(self) -> None:
+        """The model picks from a fixed list — it cannot invent an action name."""
+        from app.agent.actions import SELECTABLE_VALUES
+
+        schema = TOOL_REGISTRY["suggest_next_step"][0]["input_schema"]
+        assert schema["properties"]["action"]["enum"] == list(SELECTABLE_VALUES)
+        assert "none" not in SELECTABLE_VALUES
 
     def test_schemas_cover_exactly_the_registry(self) -> None:
         assert {s["name"] for s in TOOL_SCHEMAS} == set(TOOL_REGISTRY)
@@ -116,6 +127,7 @@ class TestToolSchemas:
             "get_move_details",
             "get_company_info",
             "search_company_knowledge",
+            "suggest_next_step",
         }
 
     def test_every_identifier_is_on_the_forbidden_list(self) -> None:
@@ -337,10 +349,13 @@ class TestReadOnly:
         quote = bound["quote"]
         before = (quote.status, quote.amount_min_cents, _as_utc(quote.valid_until))
 
-        # Arguments per tool: only the knowledge search takes one.
+        # Arguments per tool; the rest take none.
+        tool_arguments = {
+            "search_company_knowledge": {"query": "cancellation"},
+            "suggest_next_step": {"action": "change_date"},
+        }
         for name in TOOL_REGISTRY:
-            arguments = {"query": "cancellation"} if name == "search_company_knowledge" else None
-            bound["executor"].execute(name, arguments)
+            bound["executor"].execute(name, tool_arguments.get(name))
 
         db.expire_all()
         refreshed = db.get(type(quote), quote.id)
