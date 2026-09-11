@@ -16,7 +16,8 @@ from app.models.conversation import (
     Message,
     MessageRole,
 )
-from app.models.job import Job, JobSource
+from app.models.import_batch import ImportFormat, JobImportBatch
+from app.models.job import Job, JobSource, MoveType, ParkingDifficulty
 from app.models.lead import Lead, LeadSource, LeadStatus
 from app.models.moving_request import (
     ExtractionSource,
@@ -41,15 +42,19 @@ __all__ = [
     "ConversationStatus",
     "ExtractionSource",
     "HomeSize",
+    "ImportFormat",
     "Job",
+    "JobImportBatch",
     "JobSource",
     "Lead",
     "LeadSource",
     "LeadStatus",
     "Message",
     "MessageRole",
+    "MoveType",
     "MovingRequest",
     "PackingService",
+    "ParkingDifficulty",
     "Payment",
     "PaymentStatus",
     "PricingConfigRow",

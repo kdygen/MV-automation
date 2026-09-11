@@ -13,6 +13,7 @@ from app.api.deps import CurrentUser, get_current_user
 from app.api.v1.availability import router as availability_router
 from app.api.v1.bookings import router as bookings_router
 from app.api.v1.chat import router as chat_router
+from app.api.v1.history import router as history_router
 from app.api.v1.jobs import router as jobs_router
 from app.api.v1.knowledge import router as knowledge_router
 from app.api.v1.leads import router as leads_router
@@ -28,6 +29,7 @@ api_router.include_router(quotes_router)
 api_router.include_router(leads_router)
 api_router.include_router(bookings_router)
 api_router.include_router(jobs_router)
+api_router.include_router(history_router)
 api_router.include_router(knowledge_router)
 api_router.include_router(availability_router)
 api_router.include_router(settings_router)

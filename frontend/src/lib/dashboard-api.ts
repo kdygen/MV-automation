@@ -15,9 +15,18 @@ import type {
   CompleteBookingPayload,
   ImportResult,
   JobRow,
+  ConfirmResult,
+  HistoricalSignals,
+  HistoryDetail,
+  HistoryRow,
+  HistorySummary,
+  ImportBatch,
+  ImportRequestBody,
+  InspectResult,
   KnowledgeEntry,
   KnowledgeEntryPatch,
   KnowledgeEntryPayload,
+  PreviewResult,
   LeadDetail,
   LeadRow,
   Me,
@@ -178,3 +187,78 @@ export const updateKnowledge = (id: string, patch: KnowledgeEntryPatch) =>
 
 export const deleteKnowledge = (id: string) =>
   authed<void>(`/knowledge/${id}`, { method: "DELETE" });
+
+// ---------------------------------------------------------------- history (Step 5)
+
+export const listHistory = (source?: string) =>
+  authed<HistoryRow[]>(`/history${source ? `?source=${source}` : ""}`);
+export const getHistorySummary = () => authed<HistorySummary>("/history/summary");
+export const getHistoryMove = (id: string) => authed<HistoryDetail>(`/history/${id}`);
+export const listImportBatches = () => authed<ImportBatch[]>("/history/imports");
+
+export const revertImportBatch = (id: string) =>
+  authed<ImportBatch>(`/history/imports/${id}/revert`, { method: "POST" });
+
+export const deleteHistoryMove = (id: string) =>
+  authed<void>(`/history/${id}`, { method: "DELETE" });
+
+/** Comparable moves for a move already in history. Evidence only — never a price. */
+export const getSimilarToMove = (id: string, limit = 10) =>
+  authed<HistoricalSignals>(`/history/${id}/similar?limit=${limit}`);
+
+/**
+ * Multipart upload helper for the import wizard.
+ *
+ * The mapping travels as a JSON form field because multipart cannot nest, and the file
+ * is re-sent for each stage: preview and confirm both re-read it, so confirm never
+ * trusts what a preview concluded.
+ */
+async function uploadHistory<T>(
+  path: string,
+  file: File,
+  body?: ImportRequestBody,
+): Promise<T> {
+  const token = getToken();
+  if (!token) throw new AuthRequiredError();
+
+  const form = new FormData();
+  form.append("file", file);
+  if (body) form.append("request", JSON.stringify(body));
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/api/v1${path}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+  } catch {
+    throw new ApiError("network_error", "Could not reach the server.", 0);
+  }
+
+  if (response.status === 401) throw new AuthRequiredError();
+  if (!response.ok) {
+    let code = "unknown_error";
+    let message = `Upload failed (${response.status})`;
+    try {
+      const parsed = await response.json();
+      if (parsed?.error) {
+        code = parsed.error.code;
+        message = parsed.error.message;
+      }
+    } catch {
+      /* keep defaults */
+    }
+    throw new ApiError(code, message, response.status);
+  }
+  return (await response.json()) as T;
+}
+
+export const inspectHistoryFile = (file: File) =>
+  uploadHistory<InspectResult>("/history/import/inspect", file);
+
+export const previewHistoryImport = (file: File, body: ImportRequestBody) =>
+  uploadHistory<PreviewResult>("/history/import/preview", file, body);
+
+export const confirmHistoryImport = (file: File, body: ImportRequestBody) =>
+  uploadHistory<ConfirmResult>("/history/import/confirm", file, body);

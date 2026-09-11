@@ -29,9 +29,11 @@ class JobOut(BaseModel):
     distance_miles: float | None
     quoted_hours: float | None
     quoted_total_cents: int | None
-    actual_hours: float
-    actual_crew_size: int
-    actual_total_cents: int
+    # Nullable since Step 5: an imported historical move may carry hours without money
+    # or money without hours. The importer guarantees at least one of them.
+    actual_hours: float | None
+    actual_crew_size: int | None
+    actual_total_cents: int | None
     actual_volume_cuft: float | None
     created_at: datetime
 

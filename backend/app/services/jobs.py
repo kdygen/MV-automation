@@ -212,25 +212,35 @@ def _job_from_csv_row(company_id: uuid.UUID, row: dict[str, str]) -> Job:
 def accuracy_summary(db: Session, company_id: uuid.UUID) -> AccuracySummaryOut:
     """Quote-vs-actual error stats over platform jobs (the engine's scorecard)."""
     jobs = list(db.scalars(select(Job).where(Job.company_id == company_id)))
-    with_quote = [
-        j for j in jobs if j.quoted_total_cents is not None and j.quoted_hours is not None
+
+    # Since Step 5 the actuals are nullable, so a pair is only comparable when both
+    # sides are present. Each metric picks its own comparable subset rather than
+    # requiring a row to have everything — otherwise one missing column would silently
+    # drop a job from both scorecards.
+    price_pairs = [
+        (j.actual_total_cents, j.quoted_total_cents)
+        for j in jobs
+        if j.actual_total_cents is not None and j.quoted_total_cents
+    ]
+    hour_pairs = [
+        (j.actual_hours, j.quoted_hours)
+        for j in jobs
+        if j.actual_hours is not None and j.quoted_hours is not None
     ]
 
     total_mape: float | None = None
     hours_mae: float | None = None
-    if with_quote:
+    if price_pairs:
         total_mape = (
-            sum(
-                abs(j.actual_total_cents - j.quoted_total_cents) / j.quoted_total_cents
-                for j in with_quote
-                if j.quoted_total_cents  # guarded non-zero by construction
-            )
-            / len(with_quote)
+            sum(abs(actual - quoted) / quoted for actual, quoted in price_pairs)
+            / len(price_pairs)
             * 100
         )
-        hours_mae = sum(abs(j.actual_hours - (j.quoted_hours or 0)) for j in with_quote) / len(
-            with_quote
-        )
+    if hour_pairs:
+        hours_mae = sum(abs(actual - quoted) for actual, quoted in hour_pairs) / len(hour_pairs)
+    with_quote = [
+        j for j in jobs if j.quoted_total_cents is not None or j.quoted_hours is not None
+    ]
 
     return AccuracySummaryOut(
         job_count=len(jobs),

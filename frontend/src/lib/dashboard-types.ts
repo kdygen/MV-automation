@@ -198,3 +198,199 @@ export interface StarterTopic {
   prompt: string;
   keywords: string;
 }
+
+// ---------------------------------------------------------------- history (Step 5)
+
+/** One completed move in the history table. No street addresses at list level. */
+export interface HistoryRow {
+  id: string;
+  source: "platform" | "import" | string;
+  move_date: string;
+  home_size: string;
+  move_type: string | null;
+  origin_city: string | null;
+  origin_state: string | null;
+  destination_city: string | null;
+  destination_state: string | null;
+  distance_miles: number | null;
+  quoted_hours: number | null;
+  quoted_total_cents: number | null;
+  actual_hours: number | null;
+  actual_crew_size: number | null;
+  actual_total_cents: number | null;
+}
+
+export interface HistoryDetail extends HistoryRow {
+  packing_service: string;
+  special_items: string[] | null;
+  has_storage: boolean | null;
+  origin_zip: string | null;
+  destination_zip: string | null;
+  origin_line1: string | null;
+  destination_line1: string | null;
+  origin_floor: number | null;
+  origin_has_elevator: boolean | null;
+  origin_stairs_flights: number | null;
+  destination_floor: number | null;
+  destination_has_elevator: boolean | null;
+  destination_stairs_flights: number | null;
+  long_carry: boolean | null;
+  parking_difficulty: string | null;
+  quoted_crew_size: number | null;
+  additional_charges_cents: number | null;
+  actual_volume_cuft: number | null;
+  delay_minutes: number | null;
+  issue_tags: string[] | null;
+  notes: string | null;
+  problem_notes: string | null;
+  building_notes: string | null;
+  change_notes: string | null;
+  variance_reason: string | null;
+  external_ref: string | null;
+  import_batch_id: string | null;
+  created_at: string;
+}
+
+export interface HistorySummary {
+  total_moves: number;
+  imported_moves: number;
+  platform_moves: number;
+  earliest_move_date: string | null;
+  latest_move_date: string | null;
+  median_actual_hours: number | null;
+  median_hours_error_pct: number | null;
+  median_price_error_pct: number | null;
+  moves_with_hours: number;
+  moves_with_estimate: number;
+}
+
+export interface ImportBatch {
+  id: string;
+  filename: string;
+  file_format: string;
+  row_count_total: number;
+  row_count_imported: number;
+  row_count_skipped: number;
+  row_count_rejected: number;
+  reverted_at: string | null;
+  created_at: string;
+}
+
+export interface ColumnInfo {
+  header: string;
+  sample_values: string[];
+  suggested_field: string | null;
+  confidence: string | null;
+}
+
+export interface FieldInfo {
+  name: string;
+  label: string;
+  kind: string;
+  required: boolean;
+  outcome: boolean;
+  sensitive: boolean;
+}
+
+export interface Ambiguity {
+  date_order: string | null;
+  decimal_style: string | null;
+  date_ambiguous: boolean;
+  money_ambiguous: boolean;
+  ambiguous_money_fields: string[];
+  needs_input: boolean;
+}
+
+export interface InspectResult {
+  filename: string;
+  file_format: string;
+  row_count: number;
+  columns: ColumnInfo[];
+  fields: FieldInfo[];
+  suggested_mapping: Record<string, string>;
+  ambiguity: Ambiguity;
+}
+
+export interface RowIssue {
+  field: string | null;
+  message: string;
+}
+
+export interface RowVerdict {
+  row_number: number;
+  status: "ok" | "warning" | "error" | "duplicate" | string;
+  errors: RowIssue[];
+  warnings: RowIssue[];
+  preview: Record<string, unknown>;
+}
+
+export interface PreviewResult {
+  filename: string;
+  total: number;
+  importable: number;
+  warnings: number;
+  rejected: number;
+  duplicates: number;
+  ambiguity: Ambiguity;
+  rows: RowVerdict[];
+  rows_truncated: boolean;
+}
+
+export interface ConfirmResult {
+  batch: ImportBatch;
+  rejected_rows: RowVerdict[];
+}
+
+/** The mapping plus any answers the file forced us to ask for. */
+export interface ImportRequestBody {
+  mapping: Record<string, string>;
+  date_order?: string;
+  decimal_style?: string;
+}
+
+export interface SimilarMove {
+  id: string;
+  source: string;
+  score: number;
+  coverage: number;
+  matched_on: string[];
+  move_date: string;
+  home_size: string;
+  distance_miles: number | null;
+  packing_service: string | null;
+  special_items: string[] | null;
+  origin_floor: number | null;
+  origin_stairs_flights: number | null;
+  origin_has_elevator: boolean | null;
+  destination_floor: number | null;
+  destination_stairs_flights: number | null;
+  destination_has_elevator: boolean | null;
+  long_carry: boolean | null;
+  parking_difficulty: string | null;
+  actual_hours: number | null;
+  actual_crew_size: number | null;
+  quoted_hours: number | null;
+  hours_error_pct: number | null;
+  delay_minutes: number | null;
+  issue_tags: string[] | null;
+  problem_notes: string | null;
+  building_notes: string | null;
+}
+
+/**
+ * Evidence from comparable history. Deliberately carries no price and no recommended
+ * crew — the backend does not produce them, and the UI must not imply them.
+ */
+export interface HistoricalSignals {
+  comparable_count: number;
+  moves_with_hours: number;
+  moves_with_estimate: number;
+  median_actual_hours: number | null;
+  mean_actual_hours: number | null;
+  hours_p25: number | null;
+  hours_p75: number | null;
+  median_hours_error_pct: number | null;
+  overrun_share_pct: number | null;
+  common_issue_tags: string[];
+  matches: SimilarMove[];
+}
