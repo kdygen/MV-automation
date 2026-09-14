@@ -46,6 +46,15 @@ def _to_whole_dollar_cents(amount: Decimal) -> int:
     return int(amount.quantize(_DOLLAR, rounding=ROUND_HALF_UP)) * 100
 
 
+def round_up_half_hour(hours: Decimal) -> Decimal:
+    """Round up to the next half hour — how this industry bills.
+
+    Public because the calibration layer adjusts hours and must round them the same way.
+    Duplicating the rule there would let the two drift apart silently.
+    """
+    return Decimal(math.ceil(hours * 2)) / 2
+
+
 class RuleBasedEngine:
     """Stage 1 :class:`~app.pricing.engine.PricingEngine` implementation."""
 
@@ -138,7 +147,7 @@ class RuleBasedEngine:
 
     @staticmethod
     def _round_up_half_hour(hours: Decimal) -> Decimal:
-        return Decimal(math.ceil(hours * 2)) / 2
+        return round_up_half_hour(hours)
 
     @staticmethod
     def _date_multiplier(spec: MoveSpec, config: PricingConfig) -> tuple[Decimal, list[str]]:

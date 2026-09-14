@@ -7,6 +7,11 @@ model modules to the imports below.
 
 from app.models.availability import CompanyDateCapacity
 from app.models.booking import Booking, BookingStatus
+from app.models.calibration import (
+    CalibrationModelRow,
+    CalibrationStatus,
+    QuoteCalibration,
+)
 from app.models.change_request import ChangeKind, QuoteChangeRequest
 from app.models.company import Company
 from app.models.company_knowledge import CompanyKnowledge
@@ -16,6 +21,7 @@ from app.models.conversation import (
     Message,
     MessageRole,
 )
+from app.models.geo import ZipDistance
 from app.models.import_batch import ImportFormat, JobImportBatch
 from app.models.job import Job, JobSource, MoveType, ParkingDifficulty
 from app.models.lead import Lead, LeadSource, LeadStatus
@@ -34,6 +40,8 @@ from app.models.user import User, UserRole
 __all__ = [
     "Booking",
     "BookingStatus",
+    "CalibrationModelRow",
+    "CalibrationStatus",
     "ChangeKind",
     "Company",
     "CompanyDateCapacity",
@@ -60,9 +68,11 @@ __all__ = [
     "PricingConfigRow",
     "ProcessedWebhookEvent",
     "Quote",
+    "QuoteCalibration",
     "QuoteChangeRequest",
     "QuoteStatus",
     "RequestStatus",
     "User",
+    "ZipDistance",
     "UserRole",
 ]

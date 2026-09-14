@@ -25,14 +25,20 @@ from app.core.logging import get_logger
 from app.models import (
     Booking,
     BookingStatus,
+    CalibrationModelRow,
     Company,
     Lead,
     LeadStatus,
     MovingRequest,
+    PricingConfigRow,
     Quote,
     QuoteStatus,
     RequestStatus,
 )
+from app.pricing.calibration import CalibratedEstimate
+from app.pricing.engine import Estimate
+from app.pricing.spec import MoveSpec
+from app.services import calibration as calibration_service
 from app.services import pricing as pricing_service
 
 logger = get_logger(__name__)
@@ -62,11 +68,21 @@ def create_quote_for_request(
 ) -> Quote:
     """Price the request and persist a quote (draft in review mode, else sent).
 
+    The rule engine produces the number. Calibration is then evaluated and recorded, but
+    in Step 6B it is **shadow only** — the amounts written to the quote are always the
+    engine's, and the calibrated counterpart is stored alongside for later comparison.
+    The wiring is arranged so that switching a company to ``active`` mode later changes
+    which estimate is persisted and nothing else.
+
     :raises app.pricing.PricingInputError: when the request cannot be priced yet;
         the caller leaves the request pending for manual handling.
     """
-    estimate, config_row = pricing_service.estimate_for_request(db, request)
+    base_estimate, config_row = pricing_service.estimate_for_request(db, request)
     review = company_review_mode(company)
+
+    estimate, calibration, model_row, applied = _calibrated(
+        db, company, base_estimate, request, config_row
+    )
 
     quote = Quote(
         company_id=company.id,
@@ -88,6 +104,17 @@ def create_quote_for_request(
     request.status = RequestStatus.QUOTED
     lead.status = LeadStatus.QUOTED
     db.add(quote)
+    db.flush()
+
+    if calibration is not None:
+        calibration_service.record_for_quote(
+            db,
+            company_id=company.id,
+            quote_id=quote.id,
+            result=calibration,
+            model_row=model_row,
+            applied=applied,
+        )
     db.commit()
 
     logger.info(
@@ -99,6 +126,31 @@ def create_quote_for_request(
         quote.amount_max_cents,
     )
     return quote
+
+
+def _calibrated(
+    db: Session,
+    company: Company,
+    base: Estimate,
+    request: MovingRequest,
+    config_row: PricingConfigRow,
+) -> tuple[Estimate, CalibratedEstimate | None, CalibrationModelRow | None, bool]:
+    """Evaluate calibration for a quote about to be created.
+
+    Returns the estimate to persist, the calibration result to record, the model that
+    produced it, and whether it was applied. Any failure here yields the untouched base
+    estimate: a customer must never lose a quote because calibration misbehaved.
+    """
+    try:
+        config = pricing_service.load_config(config_row)
+        spec = MoveSpec.from_moving_request(request)
+        result, model_row, apply = calibration_service.evaluate_for_quote(
+            db, company, base, spec, config
+        )
+        return (result.calibrated if apply else base), result, model_row, apply
+    except Exception:
+        logger.exception("Calibration failed for company %s; using the rule engine", company.id)
+        return base, None, None, False
 
 
 def get_quote_by_token(db: Session, token: str) -> Quote:

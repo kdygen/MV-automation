@@ -11,7 +11,7 @@ from __future__ import annotations
 import csv
 import io
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -38,6 +38,10 @@ from app.schemas.jobs import (
 )
 
 logger = get_logger(__name__)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
 
 REQUIRED_CSV_COLUMNS = {
     "move_date",
@@ -77,12 +81,36 @@ def complete_booking(
         company_id=company_id,
         booking_id=booking.id,
         source=JobSource.PLATFORM,
+        completed_at=_utcnow(),
+        # --- what the move was, copied from the request that was priced ---
         move_date=booking.scheduled_date,
         home_size=request.home_size,
         packing_service=request.packing_service,
         distance_miles=request.distance_miles,
+        special_items=list(request.special_items or []),
+        # Geography. City/state/ZIP only — street addresses stay on the request, matching
+        # the Step 5 rule that they are opt-in and never auto-collected.
+        origin_city=request.origin_city,
+        origin_state=request.origin_state,
+        origin_zip=request.origin_zip,
+        destination_city=request.destination_city,
+        destination_state=request.destination_state,
+        destination_zip=request.destination_zip,
+        # Access. These drive labor hours more than anything except home size, and the
+        # intake form always collects them, so a platform completion is the richest
+        # training row we can produce. Omitting them (as this did before Step 6) made our
+        # own completions no better than a sparse legacy import.
+        origin_floor=request.origin_floor,
+        origin_has_elevator=request.origin_has_elevator,
+        origin_stairs_flights=request.origin_stairs_flights,
+        destination_floor=request.destination_floor,
+        destination_has_elevator=request.destination_has_elevator,
+        destination_stairs_flights=request.destination_stairs_flights,
+        # --- what we predicted, from the quote the customer actually accepted ---
         quoted_hours=quote.estimated_hours,
+        quoted_crew_size=quote.crew_size,
         quoted_total_cents=quote.total_cents,
+        # --- what actually happened ---
         actual_hours=payload.actual_hours,
         actual_crew_size=payload.actual_crew_size,
         actual_total_cents=round(payload.actual_total_dollars * 100),
@@ -210,8 +238,19 @@ def _job_from_csv_row(company_id: uuid.UUID, row: dict[str, str]) -> Job:
 
 
 def accuracy_summary(db: Session, company_id: uuid.UUID) -> AccuracySummaryOut:
-    """Quote-vs-actual error stats over platform jobs (the engine's scorecard)."""
-    jobs = list(db.scalars(select(Job).where(Job.company_id == company_id)))
+    """Quote-vs-actual error stats for **platform** jobs — our engine's scorecard.
+
+    Imported jobs are excluded on purpose. Their ``quoted_*`` values came from the
+    company's previous system, so averaging them together with ours would produce a
+    number that describes neither engine. Measuring our engine against imported history
+    requires recomputing our own baseline for those rows, which is what
+    :mod:`app.pricing.baseline` and the evaluation service do.
+    """
+    jobs = list(
+        db.scalars(
+            select(Job).where(Job.company_id == company_id, Job.source == JobSource.PLATFORM)
+        )
+    )
 
     # Since Step 5 the actuals are nullable, so a pair is only comparable when both
     # sides are present. Each metric picks its own comparable subset rather than

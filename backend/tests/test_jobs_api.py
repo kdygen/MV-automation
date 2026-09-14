@@ -6,7 +6,7 @@ import io
 import uuid
 
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.models import (
     Booking,
@@ -222,12 +222,19 @@ class TestJobsAndAccuracy:
         assert body["hours_mae"] == round(abs(8.5 - job.quoted_hours), 2)
         assert quote["status"] == "accepted"
 
-        # Imported jobs raise job_count but not jobs_with_quote.
+        # Imported jobs are excluded from this scorecard (Step 6A).
+        #
+        # Their quoted values came from the company's previous system, so counting them
+        # here would average our engine's error together with someone else's and
+        # describe neither. Measuring our engine against imported history means
+        # recomputing our own baseline for those rows, which the evaluation service
+        # does instead.
         client.post(
             "/api/v1/jobs/import",
             files={"file": ("h.csv", io.BytesIO(VALID_CSV.encode()), "text/csv")},
             headers=auth_headers,
         )
         body = client.get("/api/v1/jobs/accuracy", headers=auth_headers).json()
-        assert body["job_count"] == 4
+        assert body["job_count"] == 1
         assert body["jobs_with_quote"] == 1
+        assert db.scalar(select(func.count()).select_from(Job)) == 4  # imports did land
