@@ -7,6 +7,10 @@
  * If a topic is not here, the assistant says it does not know rather than guessing —
  * so the page leads with the topics that are still unanswered.
  *
+ * Two authoring surfaces, one answer book: entries the owner writes here, and policy
+ * documents they upload below. Both feed the same retrieval index, so an owner picks
+ * whichever matches what they already have rather than learning a distinction.
+ *
  * All state is local and refetched after each write; there is no client-side cache to
  * fall out of step with the server. Validation logic lives in `@/lib/knowledge` so it
  * can be tested without a DOM.
@@ -39,6 +43,7 @@ import {
   uncoveredStarters,
 } from "@/lib/knowledge";
 import { EmptyState, Loading, PageHeader } from "@/components/dashboard";
+import { KnowledgeDocuments } from "@/components/knowledge-documents";
 import { Button, Card, Checkbox, ErrorBanner, Field, Select, TextArea, TextInput } from "@/components/ui";
 
 export default function KnowledgePage() {
@@ -171,6 +176,8 @@ export default function KnowledgePage() {
           </section>
         ))
       )}
+
+      <KnowledgeDocuments />
     </div>
   );
 }

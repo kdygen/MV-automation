@@ -85,8 +85,10 @@ def _is_heading(line: str) -> str | None:
     # but only if it reads like a *label*. Internal commas and colons mean it is a
     # sentence fragment ("Also known as: COI, proof of insurance"), and misreading one as
     # a heading silently drops its text, which is the worst possible failure for an index.
+    # A pipe means it is a table row flattened by the document extractor ("Item |
+    # Surcharge"), which belongs in the body with the rows beneath it.
     stripped = line.strip()
-    if len(stripped) > 80 or any(mark in stripped for mark in (":", ",", ";")):
+    if len(stripped) > 80 or any(mark in stripped for mark in (":", ",", ";", "|")):
         return None
     if stripped.endswith((".", "!", "?")):
         return None

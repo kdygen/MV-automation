@@ -28,7 +28,15 @@ EMBEDDING_DIMENSIONS = 1536
 #: comparable, so retrieval always filters on this alongside the tenant.
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 
-EmbeddingVector = Vector(EMBEDDING_DIMENSIONS).with_variant(JSON(), "sqlite")
+#: ``none_as_null=True`` is the load-bearing part of the SQLite variant. Without it
+#: SQLAlchemy stores a missing vector as the JSON text ``'null'``, which is *not* SQL
+#: NULL — so ``embedding IS NOT NULL`` and ``count(embedding)`` would both count a chunk
+#: that has no vector, and only on SQLite. Every "is this chunk embedded?" query would
+#: then answer differently in tests than in production, which is the one divergence this
+#: portable type exists to prevent.
+EmbeddingVector = Vector(EMBEDDING_DIMENSIONS).with_variant(
+    JSON(none_as_null=True), "sqlite"
+)
 
 
 def cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:

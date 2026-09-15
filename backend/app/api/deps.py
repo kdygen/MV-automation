@@ -9,7 +9,8 @@ without minting real tokens.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 
 from fastapi import Depends
@@ -19,11 +20,17 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.errors import AuthError, ForbiddenError
+from app.core.logging import get_logger
 from app.core.security import decode_access_token
-from app.db.session import get_db
+from app.db.session import get_db, get_sessionmaker
 from app.models.user import User, UserRole
 from app.providers.distance import DistanceProvider, get_distance_provider
 from app.providers.email import FakeEmailProvider, ResendEmailProvider, get_email_provider
+from app.providers.embeddings import (
+    EmbeddingConfigurationError,
+    EmbeddingProvider,
+    get_embedding_provider,
+)
 from app.providers.payment import (
     FakePaymentProvider,
     StripePaymentProvider,
@@ -35,12 +42,54 @@ AnyEmailProvider = FakeEmailProvider | ResendEmailProvider
 # Fake offline in dev and every test; Stripe in production.
 AnyPaymentProvider = FakePaymentProvider | StripePaymentProvider
 
+logger = get_logger(__name__)
+
+#: A session factory for work that outlives the request that started it.
+SessionScope = Callable[[], AbstractContextManager[Session]]
+
 _bearer = HTTPBearer(auto_error=False)
 
 
 def distance_provider_dep(settings: Settings = Depends(get_settings)) -> DistanceProvider:
     """Resolve the configured distance provider (overridden in tests)."""
     return get_distance_provider(settings)
+
+
+def embedding_provider_dep(
+    settings: Settings = Depends(get_settings),
+) -> EmbeddingProvider | None:
+    """Resolve the configured embedding provider, or ``None`` if it is not usable.
+
+    Returning ``None`` rather than raising is deliberate. Indexing already treats an
+    absent vector as "lexically retrievable only", so a missing API key degrades search
+    quality instead of rejecting an owner's upload — and the misconfiguration is logged
+    where an operator will see it rather than surfaced to the person uploading a file.
+    """
+    try:
+        return get_embedding_provider(settings)
+    except EmbeddingConfigurationError as exc:
+        logger.warning("Embeddings unavailable, indexing lexically only: %s", exc)
+        return None
+
+
+@contextmanager
+def _new_session() -> Iterator[Session]:
+    session = get_sessionmaker()()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+def session_scope_dep() -> SessionScope:
+    """Hand back a factory for sessions that background work can own.
+
+    The request's own session from :func:`get_db` is closed as soon as the response is
+    sent, so a background task must open its own. Injecting the factory rather than
+    calling :func:`get_sessionmaker` directly is what lets the test suite point ingestion
+    at the same in-memory database the request used.
+    """
+    return _new_session
 
 
 def email_provider_dep(settings: Settings = Depends(get_settings)) -> AnyEmailProvider:

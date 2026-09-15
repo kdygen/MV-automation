@@ -192,6 +192,44 @@ export type KnowledgeEntryPatch = Partial<KnowledgeEntryPayload>;
  * An onboarding template: a question customers ask, plus the search vocabulary for it.
  * Carries no `content` — the owner writes every business fact themselves.
  */
+/** Ingestion lifecycle of an uploaded document. Mirrors `DocumentStatus` in the backend. */
+export type DocumentStatus = "pending" | "processing" | "ready" | "failed" | "inactive";
+
+export interface KnowledgeDocument {
+  id: string;
+  title: string;
+  original_filename: string;
+  mime_type: string;
+  byte_size: number;
+  status: DocumentStatus;
+  /** Owner-facing sentence naming the problem and the fix. Null unless failed. */
+  failure_reason: string | null;
+  page_count: number | null;
+  chunk_count: number;
+  /** Fewer than `chunk_count` means keyword-searchable but not semantically. */
+  embedded_chunk_count: number;
+  indexed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One indexed passage, exactly as retrieval sees it. */
+export interface DocumentPassage {
+  chunk_index: number;
+  heading: string | null;
+  page_from: number | null;
+  page_to: number | null;
+  token_count: number;
+  content: string;
+  is_embedded: boolean;
+}
+
+export interface KnowledgeDocumentDetail extends KnowledgeDocument {
+  extracted_text: string | null;
+  extracted_text_truncated: boolean;
+  passages: DocumentPassage[];
+}
+
 export interface StarterTopic {
   category: string;
   title: string;

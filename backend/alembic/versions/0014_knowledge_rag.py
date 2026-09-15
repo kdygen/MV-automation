@@ -62,7 +62,8 @@ def upgrade() -> None:
         sa.Column("byte_size", sa.Integer(), nullable=False),
         sa.Column("status", sa.String(length=20), nullable=False),
         sa.Column("failure_reason", sa.String(length=300), nullable=True),
-        sa.Column("content_hash", sa.String(length=64), nullable=False),
+        sa.Column("source_hash", sa.String(length=64), nullable=False),
+        sa.Column("content_hash", sa.String(length=64), nullable=True),
         sa.Column("extracted_text", sa.Text(), nullable=True),
         sa.Column("page_count", sa.Integer(), nullable=True),
         sa.Column("indexed_at", sa.DateTime(timezone=True), nullable=True),
@@ -84,6 +85,7 @@ def upgrade() -> None:
             name=op.f("fk_knowledge_documents_created_by_user_id_users"),
             ondelete="SET NULL",
         ),
+        sa.UniqueConstraint("company_id", "source_hash", name="uq_knowledge_documents_source"),
         sa.UniqueConstraint("company_id", "content_hash", name="uq_knowledge_documents_content"),
     )
     op.create_index(

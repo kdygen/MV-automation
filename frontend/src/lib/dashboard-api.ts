@@ -23,6 +23,8 @@ import type {
   ImportBatch,
   ImportRequestBody,
   InspectResult,
+  KnowledgeDocument,
+  KnowledgeDocumentDetail,
   KnowledgeEntry,
   KnowledgeEntryPatch,
   KnowledgeEntryPayload,
@@ -187,6 +189,74 @@ export const updateKnowledge = (id: string, patch: KnowledgeEntryPatch) =>
 
 export const deleteKnowledge = (id: string) =>
   authed<void>(`/knowledge/${id}`, { method: "DELETE" });
+
+// ------------------------------------------------- knowledge documents (Step 7E/7F)
+
+const DOCUMENTS = "/knowledge/documents";
+
+export const listDocuments = () => authed<KnowledgeDocument[]>(DOCUMENTS);
+
+export const getDocument = (id: string) =>
+  authed<KnowledgeDocumentDetail>(`${DOCUMENTS}/${id}`);
+
+/**
+ * Upload a policy document.
+ *
+ * Returns as soon as the file is stored, with `status: "pending"` — parsing and
+ * embedding happen on the server after the response, so the caller polls rather than
+ * waiting. Multipart, so it bypasses the JSON `authed` helper.
+ */
+export async function uploadDocument(
+  file: File,
+  title?: string,
+): Promise<KnowledgeDocument> {
+  const token = getToken();
+  if (!token) throw new AuthRequiredError();
+
+  const form = new FormData();
+  form.append("file", file);
+  if (title?.trim()) form.append("title", title.trim());
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/api/v1${DOCUMENTS}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+  } catch {
+    throw new ApiError("network_error", "Could not reach the server.", 0);
+  }
+
+  if (response.status === 401) throw new AuthRequiredError();
+  if (!response.ok) {
+    let code = "unknown_error";
+    let message = `Upload failed (${response.status})`;
+    try {
+      const body = await response.json();
+      if (body?.error) {
+        code = body.error.code;
+        message = body.error.message;
+      }
+    } catch {
+      /* keep defaults */
+    }
+    throw new ApiError(code, message, response.status);
+  }
+  return (await response.json()) as KnowledgeDocument;
+}
+
+export const retryDocument = (id: string) =>
+  authed<KnowledgeDocumentDetail>(`${DOCUMENTS}/${id}/retry`, { method: "POST" });
+
+export const setDocumentActive = (id: string, is_active: boolean) =>
+  authed<KnowledgeDocument>(`${DOCUMENTS}/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ is_active }),
+  });
+
+export const deleteDocument = (id: string) =>
+  authed<void>(`${DOCUMENTS}/${id}`, { method: "DELETE" });
 
 // ---------------------------------------------------------------- history (Step 5)
 

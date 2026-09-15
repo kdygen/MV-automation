@@ -55,9 +55,14 @@ class KnowledgeDocument(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "knowledge_documents"
     __table_args__ = (
-        # Re-uploading the same file must not double a company's policy index. Hashing
-        # the *extracted text* rather than the bytes means a re-exported PDF with new
-        # metadata is still recognised as the same document.
+        # Two independent identities, because "the same file" and "the same policy" are
+        # different questions and fail at different times.
+        #
+        # ``source_hash`` (the bytes) is known the instant the upload arrives, so an
+        # accidental re-upload is refused before any parsing happens. ``content_hash``
+        # (the extracted text) is only known after parsing, and catches the case the byte
+        # hash cannot: the same policy re-exported from Word, where every byte differs.
+        UniqueConstraint("company_id", "source_hash", name="uq_knowledge_documents_source"),
         UniqueConstraint("company_id", "content_hash", name="uq_knowledge_documents_content"),
         Index("ix_knowledge_documents_company_id_status", "company_id", "status"),
     )
@@ -78,7 +83,15 @@ class KnowledgeDocument(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     #: Customer-safe explanation shown to the owner, e.g. "looks like a scanned document".
     failure_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
-    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: SHA-256 of the uploaded bytes. Always known, so this is what the upload route
+    #: checks before it creates anything.
+    source_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: SHA-256 of the extracted text, or NULL until extraction succeeds. Nullable on
+    #: purpose: a document that could not be parsed has no text to identify it by, and
+    #: inventing a value would make two unreadable files look like duplicates of each
+    #: other. NULLs are distinct in a unique index on both PostgreSQL and SQLite, so any
+    #: number of unparsed documents coexist.
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     #: Retained so re-chunking — after a chunking change or a model upgrade — never has
     #: to re-parse the original file, which may no longer exist.
     extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)

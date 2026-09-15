@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
 import jwt
@@ -26,7 +27,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.api.deps import email_provider_dep
+from app.api.deps import email_provider_dep, session_scope_dep
 from app.core.config import Settings, get_settings
 from app.db.base import Base
 from app.db.session import get_db
@@ -91,6 +92,14 @@ def app(db: Session, test_settings: Settings, email_outbox: FakeEmailProvider) -
     application.dependency_overrides[get_db] = _override_get_db
     application.dependency_overrides[get_settings] = lambda: test_settings
     application.dependency_overrides[email_provider_dep] = lambda: email_outbox
+
+    # Background ingestion opens its own session in production. Point it at the same
+    # in-memory database the request used, without letting it close the shared session.
+    @contextmanager
+    def _shared_session() -> Iterator[Session]:
+        yield db
+
+    application.dependency_overrides[session_scope_dep] = lambda: _shared_session
     return application
 
 
