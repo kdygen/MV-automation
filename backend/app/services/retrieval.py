@@ -13,6 +13,14 @@ PostgreSQL and SQLite differ only in **how candidates are found** — an HNSW co
 versus Python cosine over the tenant's rows. Fusion, dedup and gating are the same pure
 functions either way, so the logic most likely to be wrong is exercised identically on
 both, and an opt-in parity test pins the two candidate paths to the same ordering.
+
+Every ordering here breaks ties on ``content_hash`` rather than on the chunk's primary
+key. A chunk id is generated fresh by each insert, so an id tiebreaker would reorder
+equally-scoring passages whenever a document was re-indexed, and would order them
+differently in PostgreSQL than in SQLite from the same data. The content hash is derived
+from the passage text, so it is the same value in both databases and survives a
+re-index — which is what makes "the same question returns the same answer" true rather
+than usually true.
 """
 
 from __future__ import annotations
@@ -50,6 +58,17 @@ ARM_LIMIT = 20
 #: Guard on the SQLite path, which scores in Python. A tenant with more active chunks
 #: than this needs PostgreSQL; the lexical arm still answers in the meantime.
 MAX_PYTHON_SCAN = 5000
+
+#: Decimal places a similarity is rounded to before ordering.
+#:
+#: pgvector stores ``float4`` and SQLite scores in Python ``float``, so the same passage
+#: and the same query produce similarities that agree to about eight decimal places and
+#: not further. Two passages that genuinely tie therefore differ by ~1e-9, which is
+#: enough to order them one way in PostgreSQL and the other way in SQLite — and enough to
+#: reorder them between two runs on the same database. Rounding first means a real tie is
+#: recognised as a tie and broken by ``content_hash``, which is stable everywhere. Nothing
+#: is lost: a 1e-9 difference in cosine similarity is not a ranking signal.
+SIMILARITY_PRECISION = 6
 
 
 @dataclass(frozen=True)
@@ -143,7 +162,7 @@ def _lexical_candidates(
         statement = (
             _visible_chunks(company_id)
             .where(tsv.op("@@")(tsq))
-            .order_by(sa_func.ts_rank_cd(tsv, tsq).desc(), KnowledgeChunk.id)
+            .order_by(sa_func.ts_rank_cd(tsv, tsq).desc(), KnowledgeChunk.content_hash)
             .limit(limit)
         )
         return [_to_candidate(chunk) for chunk in db.scalars(statement)]
@@ -163,7 +182,7 @@ def _lexical_candidates(
         chunk_terms = tokenize(chunk.content)
         if terms <= chunk_terms:
             scored.append((len(terms), chunk))
-    scored.sort(key=lambda row: (-row[0], str(row[1].id)))
+    scored.sort(key=lambda row: (-row[0], row[1].content_hash))
     return [_to_candidate(chunk) for _, chunk in scored[:limit]]
 
 
@@ -181,27 +200,37 @@ def _vector_candidates(
     )
 
     if db.bind is not None and db.bind.dialect.name == "postgresql":
+        # The SQL ordering stays on the raw distance so the HNSW index can serve it; the
+        # rows it returns are then re-ordered deterministically below.
         distance = KnowledgeChunk.embedding.cosine_distance(query_vector)
         rows = db.execute(
             base.add_columns(distance.label("distance"))
-            .order_by(distance, KnowledgeChunk.id)
+            .order_by(distance, KnowledgeChunk.content_hash)
             .limit(limit)
         ).all()
-        return [
-            _to_candidate(chunk, similarity=1.0 - float(distance))
-            for chunk, distance in rows
-        ]
+        scored = [(1.0 - float(distance), chunk) for chunk, distance in rows]
+    else:
+        scored = []
+        for chunk in db.scalars(base.limit(MAX_PYTHON_SCAN)):
+            stored = chunk.embedding
+            if not stored:
+                continue
+            scored.append((cosine_similarity(query_vector, list(stored)), chunk))
 
-    scored: list[tuple[float, KnowledgeChunk]] = []
-    for chunk in db.scalars(base.limit(MAX_PYTHON_SCAN)):
-        stored = chunk.embedding
-        if not stored:
-            continue
-        scored.append((cosine_similarity(query_vector, list(stored)), chunk))
-    scored.sort(key=lambda row: (-row[0], str(row[1].id)))
     return [
-        _to_candidate(chunk, similarity=similarity) for similarity, chunk in scored[:limit]
+        _to_candidate(chunk, similarity=similarity)
+        for similarity, chunk in _rank(scored)[:limit]
     ]
+
+
+def _rank(
+    scored: list[tuple[float, KnowledgeChunk]]
+) -> list[tuple[float, KnowledgeChunk]]:
+    """Order by similarity, breaking genuine ties on content rather than on float noise."""
+    return sorted(
+        scored,
+        key=lambda row: (-round(row[0], SIMILARITY_PRECISION), row[1].content_hash),
+    )
 
 
 def hybrid_search(

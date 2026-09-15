@@ -7,6 +7,10 @@ changing one warrants the same bar as changing prices.
 Tenancy: every handler passes ``user.company_id`` from the verified bearer token. No
 route accepts a company identifier in its path, query, or body — the write schemas set
 ``extra="forbid"``, so a client that tries to send one gets a 422.
+
+Writes also keep the semantic chunk index in step with the entry they changed. That
+index is not what the customer-facing agent reads today — it still serves Step 3A
+keyword results — so an indexing problem is logged and never fails the owner's save.
 """
 
 from __future__ import annotations
@@ -16,9 +20,15 @@ import uuid
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import CurrentUser, get_current_user, require_roles
+from app.api.deps import (
+    CurrentUser,
+    embedding_provider_dep,
+    get_current_user,
+    require_roles,
+)
 from app.db.session import get_db
 from app.models import UserRole
+from app.providers.embeddings import EmbeddingProvider
 from app.schemas.knowledge import (
     KnowledgeEntryIn,
     KnowledgeEntryOut,
@@ -56,8 +66,9 @@ def create_knowledge(
     payload: KnowledgeEntryIn,
     user: CurrentUser = Depends(_admin_only),
     db: Session = Depends(get_db),
+    provider: EmbeddingProvider | None = Depends(embedding_provider_dep),
 ) -> KnowledgeEntryOut:
-    return knowledge_service.create_entry(db, user.company_id, payload)
+    return knowledge_service.create_entry(db, user.company_id, payload, provider=provider)
 
 
 @router.patch("/{entry_id}", response_model=KnowledgeEntryOut)
@@ -66,9 +77,12 @@ def update_knowledge(
     payload: KnowledgeEntryPatch,
     user: CurrentUser = Depends(_admin_only),
     db: Session = Depends(get_db),
+    provider: EmbeddingProvider | None = Depends(embedding_provider_dep),
 ) -> KnowledgeEntryOut:
     """Partial update, including the ``is_active`` toggle."""
-    return knowledge_service.update_entry(db, user.company_id, entry_id, payload)
+    return knowledge_service.update_entry(
+        db, user.company_id, entry_id, payload, provider=provider
+    )
 
 
 @router.delete("/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -39,13 +39,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import ConflictError, NotFoundError
+from app.core.logging import get_logger
 from app.models import CompanyKnowledge
+from app.providers.embeddings import EmbeddingProvider
 from app.schemas.knowledge import (
     KnowledgeEntryIn,
     KnowledgeEntryOut,
     KnowledgeEntryPatch,
     StarterTopicOut,
 )
+from app.services import indexing
+
+logger = get_logger(__name__)
 
 #: The category vocabulary offered in the dashboard. Free text at the database level —
 #: this is a suggestion list, not a constraint — but a shared vocabulary keeps the
@@ -347,6 +352,30 @@ def _commit(db: Session, title: str) -> None:
         raise ConflictError(f"An entry titled {title!r} already exists") from exc
 
 
+#: Fields whose value ends up inside a chunk's text or metadata. A change to any of
+#: them invalidates the index; a change to anything else (today, only ``is_active``) is
+#: a visibility flip that costs no embeddings.
+_INDEXED_FIELDS = frozenset({"title", "content", "keywords", "category"})
+
+
+def _reindex(db: Session, entry: CompanyKnowledge, provider: EmbeddingProvider | None) -> None:
+    """Bring one entry's chunks up to date, without ever failing the write.
+
+    The index is derived data: it can be rebuilt from ``company_knowledge`` at any time
+    by the backfill, and today nothing customer-facing reads it — the agent still serves
+    Step 3A keyword results. So an indexing problem must not turn an owner's save into a
+    500 and lose the text they wrote. It is logged at error level, and the next backfill
+    repairs it.
+
+    This tradeoff is only correct while retrieval is keyword-served. At cutover the index
+    becomes load-bearing and this should become a hard failure or a retried job.
+    """
+    try:
+        indexing.index_knowledge_entry(db, entry, provider=provider)
+    except Exception:  # noqa: BLE001 - derived data must not break the source of truth
+        logger.exception("Failed to index knowledge entry %s", entry.id)
+
+
 def list_entries(db: Session, company_id: uuid.UUID) -> list[KnowledgeEntryOut]:
     """Every entry for this company, active and inactive, grouped-friendly ordered.
 
@@ -362,7 +391,11 @@ def list_entries(db: Session, company_id: uuid.UUID) -> list[KnowledgeEntryOut]:
 
 
 def create_entry(
-    db: Session, company_id: uuid.UUID, payload: KnowledgeEntryIn
+    db: Session,
+    company_id: uuid.UUID,
+    payload: KnowledgeEntryIn,
+    *,
+    provider: EmbeddingProvider | None = None,
 ) -> KnowledgeEntryOut:
     """Create one entry for this company. Title must be unique within the tenant."""
     if _duplicate_title(db, company_id, payload.title):
@@ -379,6 +412,7 @@ def create_entry(
     db.add(entry)
     _commit(db, payload.title)
     db.refresh(entry)
+    _reindex(db, entry, provider)
     return KnowledgeEntryOut.model_validate(entry)
 
 
@@ -387,6 +421,8 @@ def update_entry(
     company_id: uuid.UUID,
     entry_id: uuid.UUID,
     patch: KnowledgeEntryPatch,
+    *,
+    provider: EmbeddingProvider | None = None,
 ) -> KnowledgeEntryOut:
     """Apply a partial update. Unset fields are left alone; ``None`` clears keywords."""
     entry = _get_owned(db, company_id, entry_id)
@@ -406,6 +442,13 @@ def update_entry(
 
     _commit(db, entry.title)
     db.refresh(entry)
+
+    # A deactivation is the common case from the dashboard toggle, and re-embedding
+    # unchanged text to flip one boolean would put an API call behind a checkbox.
+    if _INDEXED_FIELDS & changes.keys():
+        _reindex(db, entry, provider)
+    elif "is_active" in changes:
+        indexing.set_entry_chunks_active(db, entry)
     return KnowledgeEntryOut.model_validate(entry)
 
 
@@ -415,8 +458,15 @@ def delete_entry(db: Session, company_id: uuid.UUID, entry_id: uuid.UUID) -> Non
     Safe to hard-delete, unlike quotes or jobs: nothing references a knowledge row, and
     it carries no audit obligation. Deactivating (``is_active = false``) is the
     reversible option the dashboard puts first.
+
+    The chunks go first and explicitly. ``ON DELETE CASCADE`` is declared and does the
+    work on PostgreSQL, but SQLite only enforces foreign keys when a connection opts in —
+    relying on it alone would mean a deleted policy leaves retrievable chunks behind in
+    tests and not in production, which is the worst possible place for that difference.
     """
-    db.delete(_get_owned(db, company_id, entry_id))
+    entry = _get_owned(db, company_id, entry_id)
+    indexing.remove_entry_chunks(db, entry.id)
+    db.delete(entry)
     db.commit()
 
 

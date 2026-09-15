@@ -165,23 +165,31 @@ def _remove(db: Session, criterion: ColumnElement[bool]) -> int:
 # --------------------------------------------------------------- manual entries
 
 
+def _entry_chunks(entry: CompanyKnowledge) -> list[Chunk]:
+    """The passages one manual entry produces. Deterministic, and derived in one place.
+
+    The entry's curated ``keywords`` are folded into the chunk text. Those synonyms are
+    the reason Step 3A's keyword search worked at all — "COI" against "Certificate of
+    Insurance" — and carrying them into both the vector and the lexical index is the
+    single cheapest retrieval win available here.
+
+    Shared with :func:`entry_is_current`, so the backfill's "has this changed?" question
+    is answered against exactly what the indexer would write, not a re-derivation of it.
+    """
+    parts = [entry.title, entry.content]
+    if entry.keywords:
+        parts.append(f"Also known as: {entry.keywords}")
+    return chunk_text("\n\n".join(parts), title=entry.title)
+
+
 def index_knowledge_entry(
     db: Session,
     entry: CompanyKnowledge,
     *,
     provider: EmbeddingProvider | None = None,
 ) -> IndexResult:
-    """(Re)build the chunk index for one manual knowledge entry.
-
-    The entry's curated ``keywords`` are folded into the chunk text. Those synonyms are
-    the reason Step 3A's keyword search worked at all — "COI" against "Certificate of
-    Insurance" — and carrying them into both the vector and the lexical index is the
-    single cheapest retrieval win available here.
-    """
-    parts = [entry.title, entry.content]
-    if entry.keywords:
-        parts.append(f"Also known as: {entry.keywords}")
-    chunks = chunk_text("\n\n".join(parts), title=entry.title)
+    """(Re)build the chunk index for one manual knowledge entry."""
+    chunks = _entry_chunks(entry)
 
     rows = [
         {
@@ -278,35 +286,111 @@ def remove_document_chunks(db: Session, document_id: uuid.UUID) -> int:
 # ------------------------------------------------------------------- whole company
 
 
-def reindex_company(
-    db: Session, company_id: uuid.UUID, *, provider: EmbeddingProvider | None = None
-) -> IndexResult:
-    """Index every manual entry a company has. Used for backfill and model changes."""
-    entries = list(
-        db.scalars(select(CompanyKnowledge).where(CompanyKnowledge.company_id == company_id))
+@dataclass(frozen=True)
+class BackfillReport:
+    """What a backfill pass did, and what it deliberately did not do."""
+
+    entries: int
+    indexed: int
+    skipped: int
+    chunks_written: int
+    embedded: int
+    embedding_failed: bool = False
+
+    @property
+    def complete(self) -> bool:
+        """Whether every entry now has a current, fully embedded index."""
+        return not self.embedding_failed and self.entries == self.indexed + self.skipped
+
+
+def entry_is_current(
+    db: Session, entry: CompanyKnowledge, *, model: str
+) -> bool:
+    """Whether this entry's chunks already match its text, under the current model.
+
+    This is what makes the backfill idempotent in the way that matters. Re-running it
+    must not re-embed an unchanged knowledge base: at a few hundred entries per tenant
+    that is real money, and a second run is exactly what an operator does when the first
+    one was interrupted.
+
+    Chunking is deterministic, so the comparison is exact rather than heuristic — the
+    same text produces the same content hashes or the entry genuinely changed.
+    """
+    expected = [chunk.content_hash for chunk in _entry_chunks(entry)]
+    stored = list(
+        db.execute(
+            select(KnowledgeChunk.content_hash, KnowledgeChunk.embedding_model)
+            .where(KnowledgeChunk.knowledge_entry_id == entry.id)
+            .order_by(KnowledgeChunk.chunk_index)
+        ).all()
     )
-    written = embedded = 0
-    model = DEFAULT_EMBEDDING_MODEL
+    if len(stored) != len(expected):
+        return False
+    if [row[0] for row in stored] != expected:
+        return False
+    # An entry indexed while the provider was down has chunks but no vectors, and must
+    # not be skipped — it is precisely what a re-run is meant to repair.
+    return all(row[1] == model for row in stored)
+
+
+def backfill_company(
+    db: Session,
+    company_id: uuid.UUID,
+    *,
+    provider: EmbeddingProvider | None = None,
+    force: bool = False,
+) -> BackfillReport:
+    """Bring a company's manual entries into the chunk index. Safe to re-run.
+
+    Entries whose chunks already match are skipped rather than re-embedded, so the cost
+    of a second run is one cheap query per entry. ``force`` re-indexes regardless, which
+    is what a chunking change or an embedding-model change needs.
+
+    Deliberately not transactional across entries: each entry's generation swap is
+    atomic on its own, so an interrupted backfill leaves every entry either fully on its
+    old index or fully on its new one, and re-running finishes the job.
+    """
+    model = getattr(provider, "model", DEFAULT_EMBEDDING_MODEL)
+    entries = list(
+        db.scalars(
+            select(CompanyKnowledge)
+            .where(CompanyKnowledge.company_id == company_id)
+            .order_by(CompanyKnowledge.category, CompanyKnowledge.title)
+        )
+    )
+
+    indexed = skipped = written = embedded = 0
     failed = False
     for entry in entries:
+        if not force and entry_is_current(db, entry, model=model):
+            skipped += 1
+            # Activation is cheap and can drift on its own if a toggle was missed, so it
+            # is re-asserted even for an entry whose text is unchanged.
+            set_entry_chunks_active(db, entry)
+            continue
         result = index_knowledge_entry(db, entry, provider=provider)
+        indexed += 1
         written += result.chunks_written
         embedded += result.embedded
-        model = result.model
         failed = failed or result.embedding_failed
 
     logger.info(
-        "Indexed %d manual entries for company %s: %d chunks, %d embedded",
-        len(entries),
+        "Backfill for company %s: %d entries, %d indexed, %d already current, "
+        "%d chunks, %d embedded%s",
         company_id,
+        len(entries),
+        indexed,
+        skipped,
         written,
         embedded,
+        " (embeddings unavailable)" if failed else "",
     )
-    return IndexResult(
+    return BackfillReport(
+        entries=len(entries),
+        indexed=indexed,
+        skipped=skipped,
         chunks_written=written,
         embedded=embedded,
-        generation=1,
-        model=model,
         embedding_failed=failed,
     )
 

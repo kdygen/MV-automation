@@ -145,6 +145,32 @@ class OpenAIEmbeddingProvider:
         raise EmbeddingError(str(last_error)) from last_error
 
 
+#: Built providers, keyed by what actually determines their behaviour. An OpenAI client
+#: owns an HTTP connection pool, so constructing one per knowledge search would leak
+#: sockets and pay TLS setup on every customer turn. Credentials are read from the
+#: cached ``Settings``, so a key change needs a restart either way.
+_BUILT: dict[tuple[str, str], FakeEmbeddingProvider | OpenAIEmbeddingProvider] = {}
+
+
+def resolve_embedding_provider(settings: Settings) -> EmbeddingProvider | None:
+    """The configured provider, or ``None`` when it is not usable.
+
+    Returning ``None`` rather than raising is the single decision that keeps a missing
+    API key from becoming an outage: indexing already treats an absent vector as
+    "lexically retrievable only", and retrieval already falls back to the keyword arm.
+    A misconfiguration therefore degrades search quality and is logged for an operator,
+    instead of failing an owner's upload or a customer's question.
+    """
+    try:
+        key = ((settings.embedding_provider or "fake").lower(), settings.embedding_model)
+        if key not in _BUILT:
+            _BUILT[key] = get_embedding_provider(settings)
+        return _BUILT[key]
+    except EmbeddingConfigurationError as exc:
+        logger.warning("Embeddings unavailable, falling back to keyword search: %s", exc)
+        return None
+
+
 def get_embedding_provider(settings: Settings) -> FakeEmbeddingProvider | OpenAIEmbeddingProvider:
     """Return the provider selected by ``settings.embedding_provider``."""
     name = (settings.embedding_provider or "fake").lower()

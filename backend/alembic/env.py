@@ -26,6 +26,26 @@ config.set_main_option("sqlalchemy.url", database_url)
 
 target_metadata = Base.metadata
 
+#: Indexes that exist in PostgreSQL but cannot exist in the ORM metadata.
+#:
+#: Both are created by raw SQL in migration 0014 — an HNSW index over a pgvector column
+#: and a functional GIN index over ``to_tsvector('english', content)``. Neither has a
+#: SQLAlchemy ``Index`` to compare against, and keeping the model free of them is what
+#: lets the same models run on SQLite in the test suite.
+#:
+#: Without this filter, autogenerate sees two indexes it does not recognise and proposes
+#: ``DROP INDEX`` for both — so the next person to run ``alembic revision --autogenerate``
+#: against PostgreSQL would generate a migration that quietly deletes the two indexes
+#: semantic search depends on. Excluding them by name makes autogenerate leave them alone.
+UNMANAGED_INDEXES = frozenset(
+    {"ix_knowledge_chunks_embedding_hnsw", "ix_knowledge_chunks_fts"}
+)
+
+
+def include_name(name: str | None, type_: str, parent_names: dict[str, str | None]) -> bool:
+    """Hide raw-SQL indexes from autogenerate's comparison."""
+    return not (type_ == "index" and name in UNMANAGED_INDEXES)
+
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode (emit SQL without a live connection)."""
@@ -36,6 +56,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_name=include_name,
     )
 
     with context.begin_transaction():
@@ -55,6 +76,7 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             compare_type=True,
+            include_name=include_name,
         )
 
         with context.begin_transaction():

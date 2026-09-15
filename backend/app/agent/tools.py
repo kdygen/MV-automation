@@ -40,7 +40,8 @@ from app.agent.schemas import (
 )
 from app.core.logging import get_logger
 from app.models import Company, MovingRequest, Quote
-from app.services.knowledge import MAX_RESULTS, search_knowledge
+from app.services.knowledge import MAX_RESULTS
+from app.services.knowledge_search import search_for_agent
 
 logger = get_logger(__name__)
 
@@ -224,14 +225,19 @@ def search_company_knowledge(
         )
 
     # company_id comes from the server-built context — never from `arguments`.
-    matches = search_knowledge(db, context.company_id, query)
+    #
+    # Which retriever answers is a configuration decision made in `knowledge_search`,
+    # not here: today it is Step 3A keyword search, exactly as it has been since 3A.
+    # Whatever answers, the model receives the same three display fields — the source,
+    # the scores, the chunk ids and any shadow comparison never cross this line.
+    outcome = search_for_agent(db, context.company_id, query)
     return KnowledgeResults(
         results=tuple(
             # Rebuilt field by field: the score and the curated keywords stay internal.
             KnowledgeEntry(
-                category=match.category, title=match.title, content=match.content
+                category=answer.category, title=answer.title, content=answer.content
             )
-            for match in matches
+            for answer in outcome.answers
         )
     )
 

@@ -26,11 +26,7 @@ from app.db.session import get_db, get_sessionmaker
 from app.models.user import User, UserRole
 from app.providers.distance import DistanceProvider, get_distance_provider
 from app.providers.email import FakeEmailProvider, ResendEmailProvider, get_email_provider
-from app.providers.embeddings import (
-    EmbeddingConfigurationError,
-    EmbeddingProvider,
-    get_embedding_provider,
-)
+from app.providers.embeddings import EmbeddingProvider, resolve_embedding_provider
 from app.providers.payment import (
     FakePaymentProvider,
     StripePaymentProvider,
@@ -60,16 +56,10 @@ def embedding_provider_dep(
 ) -> EmbeddingProvider | None:
     """Resolve the configured embedding provider, or ``None`` if it is not usable.
 
-    Returning ``None`` rather than raising is deliberate. Indexing already treats an
-    absent vector as "lexically retrievable only", so a missing API key degrades search
-    quality instead of rejecting an owner's upload — and the misconfiguration is logged
-    where an operator will see it rather than surfaced to the person uploading a file.
+    The tolerance rule lives in :func:`resolve_embedding_provider` so the request path
+    and the agent's retrieval path cannot drift apart on what a missing key means.
     """
-    try:
-        return get_embedding_provider(settings)
-    except EmbeddingConfigurationError as exc:
-        logger.warning("Embeddings unavailable, indexing lexically only: %s", exc)
-        return None
+    return resolve_embedding_provider(settings)
 
 
 @contextmanager

@@ -80,6 +80,26 @@ class Settings(BaseSettings):
     knowledge_max_upload_bytes: int = 20 * 1024 * 1024
     knowledge_max_documents_per_company: int = 200
 
+    #: Which retriever answers the customer's policy questions.
+    #:
+    #: ``keyword`` is Step 3A and is what production serves. ``hybrid`` is the cutover
+    #: switch: it is implemented and tested, and falls back to ``keyword`` if embeddings
+    #: or vector search fail, but it must not be turned on until a shadow run over real
+    #: traffic says it should be. The 0.35 threshold below was measured on a 45-query
+    #: synthetic fixture, which is enough to reject a bad threshold and not enough to
+    #: choose a final one.
+    knowledge_retrieval_mode: Literal["keyword", "hybrid"] = "keyword"
+    #: Run the other retriever alongside the served one and log how they disagreed.
+    #: Costs one embedding call per customer question, so it is opt-in.
+    knowledge_shadow_enabled: bool = False
+    #: Log the customer's question text alongside a shadow comparison.
+    #:
+    #: Off by default and deliberately its own switch: everything else a comparison
+    #: records is counts and a hash, and this is the one field that is personal data.
+    #: Turning it on makes disagreements far easier to diagnose and puts customer text
+    #: in the application logs — a tradeoff for an operator to make knowingly.
+    knowledge_shadow_log_queries: bool = False
+
     # --- Payments ---
     #: "fake" (offline, used by every test and by local development) or "stripe".
     payment_provider: str = "fake"
