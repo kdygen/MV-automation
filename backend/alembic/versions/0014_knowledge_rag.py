@@ -8,10 +8,16 @@ Adds document storage and the chunk index that both manual knowledge entries and
 uploaded documents feed. ``company_knowledge`` is deliberately untouched: it stays the
 authored source of truth for manual entries and simply gains chunks alongside it.
 
-On PostgreSQL this also enables ``vector`` (pgvector) and ``pg_trgm``, creates an HNSW
-index for cosine search, and a functional GIN index for the lexical arm of hybrid
-retrieval. All of that is dialect-guarded — SQLite stores embeddings as JSON and scores
-in Python, so the test suite needs no Postgres.
+On PostgreSQL this also enables ``vector`` (pgvector), creates an HNSW index for cosine
+search, and a functional GIN index for the lexical arm of hybrid retrieval. All of that
+is dialect-guarded — SQLite stores embeddings as JSON and scores in Python, so the test
+suite needs no Postgres.
+
+The lexical arm needs **no extension**: ``to_tsvector``, ``websearch_to_tsquery`` and
+``ts_rank_cd`` are built into PostgreSQL. ``pg_trgm`` was considered for acronym matching
+and is deliberately not enabled — that problem is solved by requiring every query term to
+match, so asking an operator to install an extension nothing reads would be needless
+surface area.
 
 **Extension privileges:** ``CREATE EXTENSION`` requires rights the application role may
 not have on a managed instance. The statement is written ``IF NOT EXISTS`` so enabling
@@ -39,10 +45,12 @@ def upgrade() -> None:
     postgres = bind.dialect.name == "postgresql"
 
     if postgres:
-        # Supabase ships extensions in the `extensions` schema. IF NOT EXISTS makes this
-        # idempotent whether the extension was enabled here or from the dashboard.
+        # Supabase ships extensions in the `extensions` schema, which is already on the
+        # role's search_path — so the unqualified ``vector(1536)`` column below resolves,
+        # and the HNSW index can name ``extensions.vector_cosine_ops``. Installing into
+        # `public` instead would break that index. IF NOT EXISTS makes this idempotent
+        # whether the extension was enabled here or from the dashboard.
         op.execute("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions")
-        op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA extensions")
 
     op.create_table(
         "knowledge_documents",
