@@ -53,6 +53,33 @@ class Settings(BaseSettings):
     email_api_key: str = ""
     email_from: str = "quotes@example.com"
 
+    # --- Embeddings / semantic knowledge ---
+    #: "fake" (offline, used by every test and local development) or "openai".
+    embedding_provider: str = "fake"
+    embedding_model: str = "text-embedding-3-small"
+    #: Cosine floor below which a vector match is not evidence.
+    #:
+    #: Measured, not guessed. On the 45-query labelled fixture with
+    #: ``text-embedding-3-small``, against the Step 3A keyword retrieval that production
+    #: serves today (R@3 0.86, MRR 0.804, FPR 0.41):
+    #:
+    #:     0.30 -> R@3 0.96  MRR 0.964  FPR 0.41   (recall parity criterion met)
+    #:     0.35 -> R@3 0.82  MRR 0.821  FPR 0.18   (chosen)
+    #:     0.45 -> R@3 0.61  MRR 0.607  FPR 0.00
+    #:
+    #: 0.35 is chosen on asymmetric cost: a missed answer makes the assistant say it does
+    #: not know, which is safe and recoverable, while a false positive answers a question
+    #: the company never addressed. It still ranks better than the deployed baseline
+    #: (MRR 0.821 vs 0.804) and fabricates less than half as often. Cross-tenant leak rate
+    #: is 0.00 at every threshold, since tenant filtering precedes ranking entirely.
+    #: Tunable without a deploy; re-measure once real documents are indexed.
+    retrieval_min_similarity: float = 0.35
+    #: Most chunks any single answer may rest on.
+    retrieval_max_chunks: int = 5
+    #: Caps what one upload can cost us to parse, embed and store.
+    knowledge_max_upload_bytes: int = 20 * 1024 * 1024
+    knowledge_max_documents_per_company: int = 200
+
     # --- Payments ---
     #: "fake" (offline, used by every test and by local development) or "stripe".
     payment_provider: str = "fake"

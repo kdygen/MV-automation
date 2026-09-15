@@ -24,6 +24,7 @@ from app.models.conversation import (
 from app.models.geo import ZipDistance
 from app.models.import_batch import ImportFormat, JobImportBatch
 from app.models.job import Job, JobSource, MoveType, ParkingDifficulty
+from app.models.knowledge_document import DocumentStatus, KnowledgeChunk, KnowledgeDocument
 from app.models.lead import Lead, LeadSource, LeadStatus
 from app.models.moving_request import (
     ExtractionSource,
@@ -48,10 +49,13 @@ __all__ = [
     "CompanyKnowledge",
     "Conversation",
     "ConversationStatus",
+    "DocumentStatus",
     "ExtractionSource",
     "HomeSize",
     "ImportFormat",
     "Job",
+    "KnowledgeChunk",
+    "KnowledgeDocument",
     "JobImportBatch",
     "JobSource",
     "Lead",
