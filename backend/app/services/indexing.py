@@ -175,11 +175,18 @@ def _entry_chunks(entry: CompanyKnowledge) -> list[Chunk]:
 
     Shared with :func:`entry_is_current`, so the backfill's "has this changed?" question
     is answered against exactly what the indexer would write, not a re-derivation of it.
+
+    The title is passed as the chunk title rather than concatenated into the body, and
+    heading detection is off. An entry's structure is not something to rediscover: its
+    title is the heading and its content is the body, and the storage layer below already
+    overrides whatever heading the chunker would infer. Concatenating them let the
+    heuristic promote a short content line — "We charge an additional $100 per floor" —
+    to a heading, which demoted the real title into the body and put both in the prefix.
     """
-    parts = [entry.title, entry.content]
+    body = entry.content
     if entry.keywords:
-        parts.append(f"Also known as: {entry.keywords}")
-    return chunk_text("\n\n".join(parts), title=entry.title)
+        body = f"{body}\n\nAlso known as: {entry.keywords}"
+    return chunk_text(body, title=entry.title, detect_headings=False)
 
 
 def index_knowledge_entry(

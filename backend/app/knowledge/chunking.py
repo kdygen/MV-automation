@@ -46,6 +46,21 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 #: the prompt rules — but because tags are noise in both the vector and the lexical index.
 _TAG_RE = re.compile(r"<[^>]{0,200}>")
 
+#: Words that open a clause, never a section title.
+#:
+#: The fallback heading rule below accepts any short capitalised line with no terminal
+#: punctuation, which is also an exact description of a policy sentence someone forgot to
+#: end with a full stop — "We charge an additional $100 per floor". Promoting one of those
+#: to a heading pulls it out of the body and puts a sentence fragment in front of the
+#: agent as a section title.
+#:
+#: Kept to subject pronouns and the existential "there", because those are the openers
+#: that are *never* a heading. Deliberately no verb list: "What is not included in a
+#: quote" and "Do you move pianos?" are exactly how FAQ documents title their sections,
+#: and rejecting those would cost far more than this rule saves.
+_SENTENCE_OPENERS = frozenset({"we", "you", "i", "he", "she", "they", "it", "there"})
+_FIRST_WORD_RE = re.compile(r"[A-Za-z']+")
+
 
 @dataclass(frozen=True)
 class Chunk:
@@ -92,6 +107,9 @@ def _is_heading(line: str) -> str | None:
         return None
     if stripped.endswith((".", "!", "?")):
         return None
+    opener = _FIRST_WORD_RE.match(stripped)
+    if opener and opener.group().lower() in _SENTENCE_OPENERS:
+        return None
     words = stripped.split()
     if 1 <= len(words) <= 10 and stripped[0].isupper():
         return stripped
@@ -104,8 +122,17 @@ class _Section:
     paragraphs: list[str]
 
 
-def _sections(text: str) -> list[_Section]:
-    """Split into heading-led sections, preserving document structure where it exists."""
+def _sections(text: str, *, detect_headings: bool = True) -> list[_Section]:
+    """Split into heading-led sections, preserving document structure where it exists.
+
+    With ``detect_headings=False`` the text is treated as plain paragraphs under whatever
+    heading the caller supplies. That is for sources whose structure is already known —
+    see :func:`chunk_text`.
+    """
+    if not detect_headings:
+        blocks = [b.strip() for b in _PARAGRAPH_SPLIT.split(text) if b.strip()]
+        return [_Section(heading=None, paragraphs=blocks or [text])]
+
     sections: list[_Section] = []
     heading: str | None = None
     buffer: list[str] = []
@@ -169,12 +196,19 @@ def _split_oversized(paragraph: str) -> list[str]:
     return final
 
 
-def chunk_text(text: str, *, title: str | None = None) -> list[Chunk]:
+def chunk_text(
+    text: str, *, title: str | None = None, detect_headings: bool = True
+) -> list[Chunk]:
     """Split normalized text into deterministic, embeddable passages.
 
     The heading is prepended to each chunk's content so the section survives into both
     the vector and the lexical index — "Cancellations" is often the only word in a
     document that matches how a customer phrases the question.
+
+    ``detect_headings=False`` turns the heuristic off for callers that already know the
+    structure. An uploaded document has to be parsed to find its sections; a manual
+    knowledge entry does not — its title *is* the heading, and asking the chunker to
+    rediscover that from concatenated text only creates opportunities to get it wrong.
     """
     normalized = normalize(text)
     if not normalized:
@@ -182,7 +216,7 @@ def chunk_text(text: str, *, title: str | None = None) -> list[Chunk]:
 
     chunks: list[Chunk] = []
     carried: list[str] = []
-    for section in _sections(normalized):
+    for section in _sections(normalized, detect_headings=detect_headings):
         if not section.paragraphs:
             # A heading with no body of its own. Carry the text forward rather than drop
             # it: an orphaned heading is still content, and losing it loses a searchable

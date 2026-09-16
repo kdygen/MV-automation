@@ -13,6 +13,7 @@ import pytest
 from sqlalchemy import func, select
 
 from app.db.vector import EMBEDDING_DIMENSIONS, cosine_similarity
+from app.knowledge import chunking
 from app.knowledge.chunking import MAX_TOKENS, chunk_text, estimate_tokens, normalize
 from app.knowledge.evaluation import CaseKind, EvalCase, evaluate, recommend_threshold, sweep
 from app.knowledge.fusion import (
@@ -565,3 +566,150 @@ class TestMeasuredThresholdIsPinned:
         settings = Settings(_env_file=None)
         assert settings.knowledge_max_upload_bytes == 20 * 1024 * 1024
         assert settings.knowledge_max_documents_per_company == 200
+
+
+class TestHeadingDetectionDoesNotSwallowSentences:
+    """Regression: a short policy sentence is not a section heading.
+
+    Found in production. The entry titled "Stairs" with content "We charge addition 100$
+    per floor" indexed as::
+
+        Stairs — We charge addition 100$ per floor
+
+        Stairs
+
+        Also known as: ...
+
+    Two faults compounded. The content line satisfied the fallback heading rule (short,
+    capitalised, ≤10 words, no terminal punctuation), so it *became* a section heading —
+    which orphaned the real title into the body, and left ``_build`` joining both labels
+    into one prefix. Nothing was lost, but the title appeared twice and a sentence
+    fragment stood where the section name belonged.
+    """
+
+    PRODUCTION_CONTENT = "We charge addition 100$ per floor"
+
+    def test_a_sentence_without_a_full_stop_is_not_a_heading(self) -> None:
+        assert chunking._is_heading(self.PRODUCTION_CONTENT) is None
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "We charge addition 100$ per floor",
+            "We provide certificates of insurance",
+            "You may cancel up to 72 hours ahead",
+            "They must reserve the freight elevator",
+            "There is no charge for a standard COI",
+            "It depends on the building",
+        ],
+    )
+    def test_clause_openers_are_rejected(self, line: str) -> None:
+        assert chunking._is_heading(line) is None
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "Cancellation Policy",
+            "Certificate of Insurance",
+            "Stairs and elevators",
+            "Areas we serve",
+            "Pianos and heavy items",
+            "If the move takes longer than estimated",
+            "What is not included in a quote",
+            "Do you move pianos",
+            "3.2 Access and parking",
+            "# Cancellations",
+            "CANCELLATION POLICY",
+        ],
+    )
+    def test_legitimate_headings_still_detected(self, line: str) -> None:
+        """The fix must not cost us real headings — FAQ documents title sections as questions."""
+        assert chunking._is_heading(line) is not None
+
+    def test_the_production_entry_now_chunks_cleanly(self) -> None:
+        entry = CompanyKnowledge(
+            company_id=uuid.uuid4(),
+            category="access",
+            title="Stairs",
+            content=self.PRODUCTION_CONTENT,
+            keywords="stairs, flights, walk up, no elevator, third floor, extra fee",
+            is_active=True,
+        )
+        chunks = indexing._entry_chunks(entry)
+        assert len(chunks) == 1
+        content = chunks[0].content
+        assert content.startswith("Stairs\n\n")
+        assert content.count("Stairs\n\n") == 1, "the title must appear once, not twice"
+        assert "Stairs — " not in content, "content must not be promoted to a heading"
+        assert self.PRODUCTION_CONTENT in content
+        assert "Also known as:" in content
+
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "Stairs",
+            "What is not included in a quote",
+            "We move pianos",
+            "Certificate of Insurance",
+            "Deposits",
+        ],
+    )
+    def test_no_title_is_ever_duplicated_whatever_its_shape(self, title: str) -> None:
+        """The structural half of the fix: entries no longer depend on the heuristic."""
+        entry = CompanyKnowledge(
+            company_id=uuid.uuid4(),
+            category="policy",
+            title=title,
+            content="Some published policy text that the assistant may quote to a customer.",
+            keywords="alpha, beta",
+            is_active=True,
+        )
+        content = indexing._entry_chunks(entry)[0].content
+        assert content.startswith(f"{title}\n\n")
+        assert content.count(title) == 1
+        assert " — " not in content.splitlines()[0]
+
+    def test_entry_content_is_never_lost_to_heading_promotion(self) -> None:
+        entry = CompanyKnowledge(
+            company_id=uuid.uuid4(),
+            category="policy",
+            title="Cancellations",
+            content="We keep the deposit inside 72 hours",
+            keywords=None,
+            is_active=True,
+        )
+        content = indexing._entry_chunks(entry)[0].content
+        assert "We keep the deposit inside 72 hours" in content
+
+
+class TestDocumentHeadingDetectionIsUnchanged:
+    """Documents still get their structure discovered — that is what the heuristic is for."""
+
+    def test_a_document_still_splits_on_its_headings(self) -> None:
+        text = (
+            "Cancellation Policy\n\n"
+            "Cancellations made fewer than 72 hours before service forfeit the deposit.\n\n"
+            "Certificate of Insurance\n\n"
+            "We issue a certificate of insurance at no charge with three days notice.\n"
+        )
+        chunks = chunk_text(text, title="Company handbook")
+        headings = [c.heading for c in chunks]
+        assert "Cancellation Policy" in headings
+        assert "Certificate of Insurance" in headings
+
+    def test_a_sentence_between_headings_stays_in_the_body(self) -> None:
+        """The same fix, applied to documents: a stray sentence is body, not a section."""
+        text = (
+            "Cancellation Policy\n\n"
+            "We charge a fee for late cancellation\n\n"
+            "That fee equals the deposit taken at booking.\n"
+        )
+        chunks = chunk_text(text, title="Handbook")
+        assert [c.heading for c in chunks] == ["Cancellation Policy"]
+        assert any("We charge a fee for late cancellation" in c.content for c in chunks)
+
+    def test_detect_headings_off_treats_everything_as_body(self) -> None:
+        text = "Cancellation Policy\n\nSome body text that is long enough to survive.\n"
+        chunks = chunk_text(text, title="Entry", detect_headings=False)
+        assert [c.heading for c in chunks] == [None]
+        assert "Cancellation Policy" in chunks[0].content
